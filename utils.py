@@ -83,33 +83,41 @@ def process_website_file(file):
     """
     处理上传的网站列表文件，返回标准化的DataFrame
     """
+    import io
+
+    # 加载内容
     if file.name.endswith('.csv'):
         df = pd.read_csv(file)
     elif file.name.endswith('.txt'):
-        # 假设txt文件每行一个URL
-        content = file.read().decode('utf-8')
-        urls = [url.strip() for url in content.split('\n') if url.strip()]
+        content = file.read().decode('utf-8', errors='ignore')
+        urls = [line.strip() for line in content.splitlines() if line.strip()]
         df = pd.DataFrame({'URL': urls})
     else:
         raise ValueError("不支持的文件格式，请上传.csv或.txt文件")
-    
-    # 确保有URL列
+
+    # 尝试识别URL列
     if 'URL' not in df.columns:
         if len(df.columns) == 1:
-            # 如果只有一列，假设它是URL列
             df.columns = ['URL']
         else:
             raise ValueError("CSV文件中未找到URL列")
-    
-    # 清理和验证URL
-    df['URL'] = df['URL'].apply(clean_url)
-    df['is_valid'] = df['URL'].apply(validate_url)
-    
-    # 过滤无效URL
-    valid_df = df[df['is_valid']].copy()
-    valid_df.drop('is_valid', axis=1, inplace=True)
-    
-    # 去重
-    valid_df.drop_duplicates(subset=['URL'], inplace=True)
-    
+
+    # 清理 + 验证URL
+    cleaned_urls = []
+    invalid_urls = []
+    for url in df['URL']:
+        url = clean_url(str(url))
+        try:
+            if validate_url(url):
+                cleaned_urls.append(url)
+            else:
+                invalid_urls.append(url)
+        except Exception:
+            invalid_urls.append(url)
+
+    # 返回DataFrame
+    if not cleaned_urls:
+        raise ValueError("未找到任何有效网址，请检查文件内容")
+
+    valid_df = pd.DataFrame({'URL': list(set(cleaned_urls))})  # 去重
     return valid_df
