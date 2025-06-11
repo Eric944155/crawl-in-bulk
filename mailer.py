@@ -1,0 +1,174 @@
+import smtplib
+import time
+import pandas as pd
+from email.message import EmailMessage
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# 邮件模板
+DEFAULT_EMAIL_TEMPLATE = """
+尊敬的{website_name}团队：
+
+您好！
+
+我是[您的姓名]，来自[您的公司/组织]。我们注意到您的网站/产品/服务非常出色，希望能够与贵方建立合作关系。
+
+如果您对此感兴趣，请回复此邮件或通过以下方式联系我：
+电话：[您的电话]
+邮箱：[您的邮箱]
+
+期待您的回复！
+
+此致
+[您的姓名]
+[您的职位]
+[您的公司/组织]
+"""
+
+# 群发邮件的函数
+def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit=50, interval_seconds=60):
+    """
+    群发邮件函数
+    
+    参数：
+    - contacts: 包含联系方式的DataFrame
+    - smtp_config: SMTP服务器配置字典
+    - email_template: 邮件模板字符串
+    - daily_limit: 每日发送上限
+    - interval_seconds: 两封邮件之间的间隔秒数
+    """
+    # 默认SMTP配置
+    if smtp_config is None:
+        smtp_config = {
+            'server': 'smtp.gmail.com',
+            'port': 587,
+            'email': 'your_email@gmail.com',
+            'password': 'your_password',
+            'use_tls': True
+        }
+    
+    # 使用默认邮件模板
+    if email_template is None:
+        email_template = DEFAULT_EMAIL_TEMPLATE
+    
+    # 创建发送日志DataFrame
+    log_columns = ['url', 'recipient', 'status', 'error', 'timestamp']
+    send_log = pd.DataFrame(columns=log_columns)
+    
+    # 计数器
+    sent_count = 0
+    success_count = 0
+    error_count = 0
+    
+    try:
+        # 创建SMTP连接
+        if smtp_config['use_tls']:
+            server = smtplib.SMTP(smtp_config['server'], smtp_config['port'])
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(smtp_config['server'], smtp_config['port'])
+        
+        server.login(smtp_config['email'], smtp_config['password'])
+        
+        # 遍历联系人发送邮件
+        for contact in contacts.itertuples():
+            # 检查是否有邮箱
+            if not hasattr(contact, 'emails') or not contact.emails:
+                continue
+            
+            # 检查是否达到每日上限
+            if sent_count >= daily_limit:
+                print(f"已达到每日发送上限 {daily_limit} 封")
+                break
+            
+            # 获取网站名称（从URL中提取）
+            website_name = contact.url.split('//')[1].split('/')[0]
+            if website_name.startswith('www.'):
+                website_name = website_name[4:]
+            
+            # 为每个邮箱发送邮件
+            for email in contact.emails:
+                # 创建邮件
+                msg = MIMEMultipart()
+                msg['Subject'] = f'关于与{website_name}的合作机会'
+                msg['From'] = smtp_config['email']
+                msg['To'] = email
+                
+                # 替换模板中的变量
+                email_content = email_template.format(
+                    website_name=website_name
+                )
+                
+                # 添加邮件内容
+                msg.attach(MIMEText(email_content, 'plain', 'utf-8'))
+                
+                try:
+                    # 发送邮件
+                    server.send_message(msg)
+                    status = 'success'
+                    error_msg = ''
+                    success_count += 1
+                    print(f'邮件发送成功: {contact.url} -> {email}')
+                except Exception as e:
+                    status = 'error'
+                    error_msg = str(e)
+                    error_count += 1
+                    print(f'邮件发送失败: {contact.url} -> {email}, 错误: {e}')
+                
+                # 记录日志
+                log_entry = pd.DataFrame([{
+                    'url': contact.url,
+                    'recipient': email,
+                    'status': status,
+                    'error': error_msg,
+                    'timestamp': pd.Timestamp.now()
+                }])
+                send_log = pd.concat([send_log, log_entry], ignore_index=True)
+                
+                # 增加计数器
+                sent_count += 1
+                
+                # 检查是否达到每日上限
+                if sent_count >= daily_limit:
+                    print(f"已达到每日发送上限 {daily_limit} 封")
+                    break
+                
+                # 间隔发送，避免被封
+                time.sleep(interval_seconds)
+        
+        # 关闭连接
+        server.quit()
+        
+    except Exception as e:
+        print(f"SMTP连接错误: {e}")
+    
+    # 打印发送统计
+    print(f"\n发送统计:\n总计: {sent_count}\n成功: {success_count}\n失败: {error_count}")
+    
+    # 保存发送日志
+    send_log.to_csv('email_send_log.csv', index=False)
+    
+    return send_log
+
+# 配置SMTP服务器信息的函数
+def configure_smtp(server, port, email, password, use_tls=True):
+    """
+    配置SMTP服务器信息
+    """
+    return {
+        'server': server,
+        'port': port,
+        'email': email,
+        'password': password,
+        'use_tls': use_tls
+    }
+
+# 自定义邮件模板的函数
+def create_email_template(subject_template, body_template):
+    """
+    创建自定义邮件模板
+    """
+    return {
+        'subject': subject_template,
+        'body': body_template
+    }
