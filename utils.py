@@ -35,7 +35,11 @@ def extract_contacts_from_text(text):
     emails = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w\.-]+', text)
     
     # 提取电话号码
-    phones = re.findall(r'\+?\d[\d\s-\(\)]{7,}\d', text)
+    # 新的正则表达式：匹配可选的+，然后是数字，
+    # 接着是7个或更多个数字、空格、破折号或括号，最后以数字结尾。
+    # 注意：在字符集[]中，-如果是字面字符，需要放在开头或结尾，或者转义。
+    # 这里我们使用 r'[\d\s\-\(\)]' 来明确匹配数字、空白、连字符、左括号和右括号。
+    phones = re.findall(r'\+?\d[\d\s\-\(\)]{7,}\d', text)
     
     return list(set(emails)), list(set(phones))
 
