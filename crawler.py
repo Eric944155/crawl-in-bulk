@@ -3,14 +3,17 @@ from bs4 import BeautifulSoup
 import re
 import pandas as pd
 import time
-from urllib.parse import urlparse, urljoin # 导入 urljoin
+from urllib.parse import urlparse, urljoin
 from utils import extract_contacts_from_soup, extract_contact_pages, extract_social_links # 更新导入
 
 # 爬取联系方式的函数
 def crawl_contacts(websites):
     contacts = []
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Connection': 'keep-alive'
     }
 
     for url in websites['URL']:
@@ -27,12 +30,12 @@ def crawl_contacts(websites):
             
             # 请求网页，首先尝试进行SSL验证
             try:
-                response = requests.get(url, headers=headers, timeout=10)
+                response = requests.get(url, headers=headers, timeout=15) # 增加超时时间
                 response.raise_for_status() # 检查HTTP响应状态码，如果不是200会抛出异常
             except requests.exceptions.SSLError as ssl_err:
                 # 如果遇到SSL错误，则不进行SSL验证再次尝试（并打印警告）
                 print(f"SSL 错误发生于 {url}: {ssl_err}。不进行 SSL 验证重试。")
-                response = requests.get(url, headers=headers, timeout=10, verify=False)
+                response = requests.get(url, headers=headers, timeout=15, verify=False) # verify=False 忽略SSL证书验证
                 response.raise_for_status() # 再次检查响应状态
             except requests.exceptions.RequestException as req_err:
                 site_error = f"主页请求失败: {req_err}"
@@ -64,7 +67,12 @@ def crawl_contacts(websites):
             current_site_social_links.extend(social_links_main)
             
             # 递归爬取找到的潜在联系页面（最多爬取前5个，可以根据需求调整）
+            # 增加爬取深度，有助于发现深层页面的联系信息
             for contact_page_url in all_potential_contact_pages[:5]: # 增加爬取深度
+                # 检查是否是相对路径，并转换为绝对路径
+                if not contact_page_url.startswith(('http://', 'https://')):
+                    contact_page_url = urljoin(base_url, contact_page_url)
+
                 try:
                     # 尝试进行SSL验证
                     try:

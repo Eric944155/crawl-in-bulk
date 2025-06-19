@@ -1,7 +1,7 @@
 import re
 import validators
 import pandas as pd
-import io # 确保这里导入了io模块
+import io 
 from urllib.parse import urlparse, urljoin
 
 # 社交媒体域名列表
@@ -9,9 +9,9 @@ from urllib.parse import urlparse, urljoin
 SOCIAL_DOMAINS = [
     'facebook.com/', 'twitter.com/', 'x.com/', 'instagram.com/', 
     'linkedin.com/company/', 'linkedin.com/in/', 'linkedin.com/groups/',
-    'youtube.com/channel/', 'youtube.com/user/', 'youtube.com/c/', # 更具体的YouTube频道链接
+    'youtube.com/', # 更通用的YouTube链接，具体频道可在后面判断
     'pinterest.com/', 'tiktok.com/@', 'weibo.com/', 
-    'vk.com/', 'reddit.com/user/', 'snapchat.com/add/', # 增加其他常见社交媒体
+    'vk.com/', 'reddit.com/user/', 'snapchat.com/add/', 
     'whatsapp.com/', 'telegram.org/', 'medium.com/@', 'github.com/', 
     'flickr.com/', 'tumblr.com/', 'behance.net/', 'dribbble.com/'
 ]
@@ -22,19 +22,22 @@ def validate_url(url):
     验证URL格式是否正确
     """
     # 增加对URL验证的健壮性，允许更多的有效URL格式
-    return validators.url(url)
+    try:
+        return validators.url(url)
+    except validators.ValidationError:
+        return False
 
 # 清理和标准化URL
 def clean_url(url):
     """
     清理和标准化URL格式
     """
-    url = url.strip()
+    url = str(url).strip() # 确保是字符串
     if not url.startswith(('http://', 'https://')):
         url = 'http://' + url # 默认使用 http，requests 会自动重定向到 https
     return url
 
-# 从BeautifulSoup对象中提取联系方式
+# 从BeautifulSoup对象中提取联系方式 (邮箱和电话)
 def extract_contacts_from_soup(soup, base_url):
     """
     从BeautifulSoup对象中提取邮箱和电话
@@ -42,109 +45,111 @@ def extract_contacts_from_soup(soup, base_url):
     emails = []
     phones = []
 
-    # 1. 从纯文本中提取邮箱和电话
+    # 编译正则表达式，提高效率
+    # 邮箱正则表达式：匹配标准的邮箱格式，支持多种顶级域名 (2到63位)
+    email_regex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}')
+    
+    # 电话号码正则表达式：匹配更广泛的电话号码格式，包括国家代码、区号、各种分隔符
+    # 尽可能捕获常见的号码，但电话号码格式多样，难以完美覆盖所有情况
+    phone_regex = re.compile(
+        r'(?:(?:\+|00)\d{1,4}[-.\s]?)?' # 可选的国家代码，如 +86 或 0086
+        r'(?:\(?\d{2,5}\)?[-.\s]?)?'    # 可选的区号，如 (010)
+        r'\d{3,4}[-.\s]?\d{3,4}'        # 中间和最后一部分数字
+        r'(?:[-.\s]?\d{1,4})?'         # 可选的扩展位或更长数字
+    )
+
+    # 1. 从纯文本内容中提取邮箱和电话
+    # get_text() 会获取页面所有可见文本
     text = soup.get_text()
-    text_emails, text_phones = extract_contacts_from_text_regex(text)
-    emails.extend(text_emails)
-    phones.extend(text_phones)
+    
+    found_emails = email_regex.findall(text)
+    emails.extend(found_emails)
+
+    found_phones = phone_regex.findall(text)
+    for phone in found_phones:
+        cleaned_phone = re.sub(r'[^\d+]', '', phone) # 移除所有非数字字符，只保留数字和可选的开头的'+'
+        if cleaned_phone.startswith('+') and len(cleaned_phone) > 7: # 至少国家代码+7位数字
+            phones.append(cleaned_phone)
+        elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7: # 至少7位纯数字
+            phones.append(cleaned_phone)
 
     # 2. 从 'mailto:' 和 'tel:' 链接中提取邮箱和电话
     for a_tag in soup.find_all('a', href=True):
         href = a_tag['href']
         if href.startswith('mailto:'):
-            email = href[len('mailto:'):].split('?')[0] # 移除邮件主题等参数
-            if '@' in email and '.' in email: # 简单验证邮箱格式
+            email = href[len('mailto:'):].split('?')[0].strip() # 移除邮件主题等参数
+            if '@' in email and '.' in email and email_regex.match(email): # 再次验证邮箱格式
                 emails.append(email)
         elif href.startswith('tel:'):
-            phone = href[len('tel:'):].split('?')[0] # 移除电话参数
-            # 简单清理电话号码，只保留数字和 '+'
+            phone = href[len('tel:'):].split('?')[0].strip() # 移除电话参数
             cleaned_phone = re.sub(r'[^\d+]', '', phone)
-            if len(cleaned_phone) >= 7: # 至少7位数字
+            if len(cleaned_phone) >= 7:
                 phones.append(cleaned_phone)
-        
-    # 去重
+    
+    # 3. 尝试从更广泛的HTML元素属性中提取 (例如：data-email, content, placeholder等)
+    # 这种方式有助于捕获一些非标准但存在的联系信息
+    for tag in soup.find_all(True): # 查找所有HTML标签
+        for attr, value in tag.attrs.items():
+            if isinstance(value, str): # 确保属性值是字符串
+                # 检查邮箱
+                found_emails_in_attr = email_regex.findall(value)
+                emails.extend(found_emails_in_attr)
+                
+                # 检查电话
+                found_phones_in_attr = phone_regex.findall(value)
+                for phone in found_phones_in_attr:
+                    cleaned_phone = re.sub(r'[^\d+]', '', phone)
+                    if cleaned_phone.startswith('+') and len(cleaned_phone) > 7:
+                        phones.append(cleaned_phone)
+                    elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7:
+                        phones.append(cleaned_phone)
+
+    # 去重并返回
     emails = list(set(emails))
     phones = list(set(phones))
     
     return emails, phones
 
-# 新增一个私有函数，用于从纯文本中提取邮箱和电话（原 extract_contacts_from_text 逻辑）
-def extract_contacts_from_text_regex(text):
-    """
-    从纯文本中提取邮箱和电话号码
-    """
-    # 提取邮箱
-    # 使用一个更鲁棒的邮箱正则表达式
-    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}', text) # 匹配2到63位顶级域名
-    
-    # 提取电话号码
-    # 匹配更广泛的电话号码格式，考虑国家代码、区号、分隔符、国际标准
-    # 匹配模式如：+1 (123) 456-7890, 0086-10-87654321, (021) 12345678, 13812345678
-    # 这是一个相对复杂的正则，旨在覆盖多种情况
-    # 注意：电话号码正则很难做到完美，这里尝试匹配常见的几种
-    phones = re.findall(
-        r'(?:(?:\+|00)\d{1,3}[-.\s]?)?' # 可选的国家代码，如 +86 或 0086
-        r'(?:\(?\d{2,5}\)?[-.\s]?)?'    # 可选的区号，如 (010)
-        r'\d{3,4}[-.\s]?\d{3,4}'        # 中间和最后一部分数字
-        r'(?:[-.\s]?\d{1,4})?',         # 可选的扩展位或更长数字
-        text
-    )
-    
-    cleaned_phones = []
-    for phone in phones:
-        # 移除所有非数字字符，只保留数字和可选的开头的'+'
-        cleaned_phone = re.sub(r'[^\d+]', '', phone)
-        # 检查是否以'+'开头且后面是数字，或者直接是纯数字
-        if cleaned_phone.startswith('+') and len(cleaned_phone) > 7: # 至少国家代码+7位数字
-            cleaned_phones.append(cleaned_phone)
-        elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7: # 至少7位纯数字
-            cleaned_phones.append(cleaned_phone)
-
-    return list(set(emails)), list(set(cleaned_phones))
-
 # 从HTML中提取联系页面链接
 def extract_contact_pages(soup, base_url):
     """
-    从HTML中提取"联系我们"页面链接，并扩展到“关于我们”等相关页面
+    从HTML中提取"联系我们"、"关于我们"、"常见问题"等页面链接
     """
-    contact_keywords = ['contact', 'contact-us', 'contact_us', 'contactus', '联系', '联系我们']
+    contact_keywords = ['contact', 'contact-us', 'contact_us', 'contactus', '联系', '联系我们', '与我们联系', '联络']
     about_keywords = ['about', 'about-us', 'about_us', 'aboutus', '关于', '关于我们']
-    faq_keywords = ['faq', 'questions', '常见问题']
+    faq_keywords = ['faq', 'questions', '常见问题', 'help', '帮助']
     
     potential_pages = []
     
-    # 优先查找直接的联系页面
+    # 优先级：直接的联系页面 -> 关于我们/FAQ页面
+    # 同时检查链接文本和href属性
     for a in soup.find_all('a', href=True):
-        href = a['href']
+        href = a['href'].strip()
         text = a.text.lower().strip()
+        
+        # 排除无效或内部锚点链接
+        if not href or href == '#' or href.startswith('javascript:') or href.startswith('mailto:') or href.startswith('tel:'):
+            continue
         
         # 将相对路径转换为绝对路径
         if not href.startswith(('http://', 'https://')):
             href = urljoin(base_url, href)
-
-        # 避免无效或内部锚点链接
-        if not href or href == '#' or href.startswith('javascript:'):
-            continue
         
+        # 确保是有效URL
+        if not validate_url(href):
+            continue
+
         # 检查链接文本或URL中是否包含联系关键词
-        if any(keyword in href.lower() for keyword in contact_keywords) or \
-           any(keyword in text for keyword in contact_keywords):
+        is_contact_page = any(keyword in href.lower() for keyword in contact_keywords) or \
+                          any(keyword in text for keyword in contact_keywords)
+        
+        is_about_or_faq_page = (any(keyword in href.lower() for keyword in about_keywords) or any(keyword in text for keyword in about_keywords)) or \
+                               (any(keyword in href.lower() for keyword in faq_keywords) or any(keyword in text for keyword in faq_keywords))
+        
+        if is_contact_page:
             potential_pages.append(href)
-    
-    # 如果直接联系页面不多，再查找关于我们和常见问题页面
-    if len(potential_pages) < 5: # 假设我们想多找一些
-        for a in soup.find_all('a', href=True):
-            href = a['href']
-            text = a.text.lower().strip()
-
-            if not href.startswith(('http://', 'https://')):
-                href = urljoin(base_url, href)
-            if not href or href == '#' or href.startswith('javascript:'):
-                continue
-
-            if (any(keyword in href.lower() for keyword in about_keywords) or any(keyword in text for keyword in about_keywords)) or \
-               (any(keyword in href.lower() for keyword in faq_keywords) or any(keyword in text for keyword in faq_keywords)):
-                potential_pages.append(href)
+        elif is_about_or_faq_page: # 作为次要选项
+            potential_pages.append(href)
 
     # 去重并返回
     return list(set(potential_pages))
@@ -156,26 +161,36 @@ def extract_social_links(soup):
     """
     social_links = []
     
+    # 编译社交媒体域名列表，提高效率
+    compiled_social_domains = [re.compile(re.escape(domain.rstrip('/'))) for domain in SOCIAL_DOMAINS]
+
     for a in soup.find_all('a', href=True):
-        href = a['href']
-        # 检查是否包含社交媒体域名
+        href = a['href'].strip()
         # 增加对链接的初步清理，移除末尾斜杠和参数，便于匹配
         clean_href = href.split('?')[0].split('#')[0].rstrip('/')
         
-        if any(domain.rstrip('/') in clean_href.lower() for domain in SOCIAL_DOMAINS):
-            social_links.append(href) # 保留原始链接以便完整性
+        for domain_pattern in compiled_social_domains:
+            if domain_pattern.search(clean_href.lower()):
+                social_links.append(href) # 保留原始链接以便完整性
+                break # 找到一个匹配即可
     
     return list(set(social_links))
 
-# 处理上传的网站列表文件
+# 处理上传的网站列表文件或手动输入
 def process_website_file(file):
     """
-    处理上传的网站列表文件，返回标准化的DataFrame
+    处理上传的网站列表文件或手动输入的字符串，返回标准化的DataFrame。
+    接受 file 对象 (UploadedFile 或 StringIO)。
     """
     df = None
     
     if hasattr(file, 'name') and file.name.endswith('.csv'):
-        df = pd.read_csv(file)
+        # 尝试使用UTF-8编码读取CSV，如果失败则尝试GBK
+        try:
+            df = pd.read_csv(file, encoding='utf-8')
+        except UnicodeDecodeError:
+            file.seek(0) # 重置文件指针
+            df = pd.read_csv(file, encoding='gbk')
     elif hasattr(file, 'name') and file.name.endswith('.txt'):
         content = file.read().decode('utf-8', errors='ignore')
         urls = [line.strip() for line in content.splitlines() if line.strip()]
@@ -190,27 +205,34 @@ def process_website_file(file):
     if df is None or df.empty:
         raise ValueError("未能从文件中解析出有效数据。请检查文件内容或格式。")
 
-    if 'URL' not in df.columns:
-        if len(df.columns) == 1:
+    # 尝试找到URL列，可能列名不是'URL'
+    found_url_column = None
+    for col in df.columns:
+        if col.lower() == 'url':
+            found_url_column = col
+            break
+    
+    if found_url_column is None:
+        if len(df.columns) == 1: # 如果只有一列，就当它是URL列
             df.columns = ['URL']
+            found_url_column = 'URL'
         else:
-            raise ValueError("CSV文件中未找到URL列，或者文件中包含多列但没有名为'URL'的列。")
+            raise ValueError("文件中未找到'URL'列，请确保CSV文件包含名为'URL'的列或仅包含网址的单列。")
+    
+    df = df[[found_url_column]].rename(columns={found_url_column: 'URL'})
 
     # 清理 + 验证URL
     cleaned_urls = []
-    invalid_urls = []
+    # invalid_urls = [] # 暂时不需要记录无效URL，直接过滤掉
     for url in df['URL']:
         url = clean_url(str(url))
-        try:
-            if validate_url(url):
-                cleaned_urls.append(url)
-            else:
-                invalid_urls.append(url)
-        except Exception:
-            invalid_urls.append(url)
+        if validate_url(url):
+            cleaned_urls.append(url)
+        # else:
+            # invalid_urls.append(url) # 可以选择在此处记录并通知用户
 
     if not cleaned_urls:
-        raise ValueError("未找到任何有效网址，请检查文件内容")
+        raise ValueError("未找到任何有效网址，请检查文件内容或输入格式。")
 
     valid_df = pd.DataFrame({'URL': list(set(cleaned_urls))})  # 去重
     return valid_df

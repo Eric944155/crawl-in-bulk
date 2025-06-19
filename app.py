@@ -180,10 +180,10 @@ with st.sidebar:
     st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📧 SMTP 配置</h3>', unsafe_allow_html=True)
     
     smtp_server = st.text_input('SMTP 服务器', 'smtp.gmail.com', help="例如: smtp.gmail.com, smtp.qq.com")
-    smtp_port = st.number_input('SMTP 端口', value=587, min_value=1, max_value=65535, help="常用端口: 25, 465, 587")
+    smtp_port = st.number_input('SMTP 端口', value=587, min_value=1, max_value=65535, help="常用端口: 25, 465, 587 (TLS), 587 (SSL/TLS)")
     smtp_email = st.text_input('发件人邮箱', help="通常是您的邮箱地址")
-    smtp_password = st.text_input('邮箱密码', type='password', help="对于一些邮箱服务，这可能是应用专用密码")
-    use_tls = st.checkbox('使用TLS', value=True, help="大多数现代邮件服务器需要启用TLS")
+    smtp_password = st.text_input('邮箱密码', type='password', help="对于一些邮箱服务，这可能是应用专用密码或授权码")
+    use_tls = st.checkbox('使用TLS (推荐)', value=True, help="大多数现代邮件服务器使用TLS加密连接 (端口587)。部分旧服务可能使用SSL (端口465)。")
     
     smtp_test_col1, smtp_test_col2 = st.columns([3, 1])
     with smtp_test_col1:
@@ -218,8 +218,8 @@ with st.sidebar:
     st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📤 邮件发送设置</h3>', unsafe_allow_html=True)
     
     # 修改每日发送上限的默认值和最大值
-    daily_limit = st.slider('每日发送上限', min_value=1, max_value=100, value=30, help="设置每日最大发送邮件数量，避免触发邮件服务商限制。个人邮箱建议不超过50封。")
-    interval_seconds = st.slider('发送间隔(秒)', min_value=10, max_value=300, value=60, help="两封邮件之间的时间间隔，建议不少于10秒")
+    daily_limit = st.slider('每日发送上限', min_value=1, max_value=200, value=30, help="设置每日最大发送邮件数量，避免触发邮件服务商限制。个人邮箱建议不超过50封。")
+    interval_seconds = st.slider('发送间隔(秒)', min_value=10, max_value=300, value=60, help="两封邮件之间的时间间隔，建议不少于10秒，以降低被识别为垃圾邮件的风险。")
     
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -291,7 +291,7 @@ with tab1:
             st.markdown("""
             - **TXT 文件**: 每行一个网址
             - **CSV 文件**: 包含 URL 列，每行一个网址
-            - 网址格式: 建议包含 http:// 或 https:// 前缀
+            - 网址格式: 建议包含 http:// 或 https:// 前缀，例如：`https://example.com`
             """)
         
         if uploaded_file is not None:
@@ -444,7 +444,7 @@ with tab2:
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{phone_count}</span><br><span style="color: #64748B;">电话</span></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                 else:
-                    status_text.markdown('<p style="color: #B91C1C; font-weight: bold;">⚠️ 爬取完成，但未找到联系方式</p>', unsafe_allow_html=True)
+                    status_text.markdown('<p style="color: #B91C1C; font-weight: bold;">⚠️ 爬取完成，但未找到任何联系方式</p>', unsafe_allow_html=True)
                 
                 st.session_state.crawling = False
             
@@ -458,12 +458,15 @@ with tab2:
             
             st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">爬取内容包括：</p>', unsafe_allow_html=True)
             st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px;">', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong></p>', unsafe_allow_html=True)
+            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接及部分HTML属性中的邮箱)</p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">📞 <strong>电话号码</strong></p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">🔗 <strong>联系页面</strong></p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong></p>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
-            
+
+            st.markdown('<br><h4 style="color: #1E293B; font-size: 1rem; margin-bottom: 0.5rem;">💡 注意</h4>', unsafe_allow_html=True)
+            st.markdown('<p style="color: #64748B; font-size: 0.9rem;">本工具通过解析静态HTML内容进行爬取。对于大量依赖JavaScript动态加载内容的网站，可能无法获取所有联系方式。</p>', unsafe_allow_html=True)
+
             st.markdown('</div>', unsafe_allow_html=True)
         
         # 显示爬取结果
@@ -479,18 +482,25 @@ with tab2:
             # 导出功能
             export_col1, export_col2 = st.columns([1, 3])
             with export_col1:
+                # 使用SessionState来控制下载链接的显示，防止rerun后消失
+                if 'download_link_displayed' not in st.session_state:
+                    st.session_state.download_link_displayed = False
+
                 if st.button('导出数据', key='export_data', use_container_width=True):
                     # 生成带时间戳的文件名
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     export_filename = f'contacts_{timestamp}.csv'
-                    st.session_state.contacts.to_csv(export_filename, index=False)
                     
-                    # 创建下载链接
-                    csv = st.session_state.contacts.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="{export_filename}" class="download-link">点击下载 {export_filename}</a>'
+                    csv = st.session_state.contacts.to_csv(index=False).encode('utf-8')
+                    b64 = base64.b64encode(csv).decode()
+                    href = f'<a href="data:file/csv;base64,{b64}" download="{export_filename}" class="download-link" style="color: var(--primary-color); text-decoration: none;">点击下载 {export_filename}</a>'
                     
-                    export_col2.markdown(f'✅ 数据已导出: {href}', unsafe_allow_html=True)
+                    st.session_state.export_link = href
+                    st.session_state.download_link_displayed = True
+                    st.rerun() # Rerun to display the link immediately
+            with export_col2:
+                if st.session_state.download_link_displayed and 'export_link' in st.session_state:
+                    st.markdown(f'✅ 数据已导出: {st.session_state.export_link}', unsafe_allow_html=True)
             
             st.markdown('</div>', unsafe_allow_html=True)
 
@@ -531,11 +541,13 @@ with tab3:
         # 检查是否有邮箱地址
         has_emails = False
         email_count = 0
+        all_target_emails = [] # 收集所有可发送的邮箱
         for _, row in st.session_state.contacts.iterrows():
             if row['emails'] and isinstance(row['emails'], list) and len(row['emails']) > 0:
                 has_emails = True
-                email_count += len(row['emails'])
-        
+                all_target_emails.extend(row['emails'])
+        email_count = len(set(all_target_emails)) # 对所有邮箱进行去重计数
+
         if not has_emails:
             # 美化警告信息
             st.markdown(
@@ -560,18 +572,23 @@ with tab3:
                 
                 # 邮件模板
                 st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">邮件内容模板</p>', unsafe_allow_html=True)
-                st.markdown('<p style="color: #64748B; font-size: 0.8rem; margin-bottom: 0.5rem;">可使用以下变量: {company_name}, {website}, {contact_name}</p>', unsafe_allow_html=True)
+                st.markdown('<p style="color: #64748B; font-size: 0.8rem; margin-bottom: 0.5rem;">可使用以下变量进行个性化：<code>{website_name}</code> (网站名称), <code>{url}</code> (完整网址)</p>', unsafe_allow_html=True)
                 email_template = st.text_area('', DEFAULT_EMAIL_TEMPLATE, height=300, label_visibility="collapsed")
                 
                 # 模板预览
                 with st.expander("📝 模板预览"):
-                    preview_template = email_template.replace('{company_name}', '示例公司').replace('{website}', 'www.example.com').replace('{contact_name}', '张经理')
-                    st.markdown(f"<div style='background-color: #F8FAFC; padding: 1rem; border-radius: 5px;'>{preview_template}</div>", unsafe_allow_html=True)
+                    # 使用示例数据进行预览
+                    preview_template_content = email_template.replace('{website_name}', '示例公司').replace('{url}', 'https://www.example.com')
+                    st.markdown(f"<div style='background-color: #F8FAFC; padding: 1rem; border-radius: 5px;'>{preview_template_content}</div>", unsafe_allow_html=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 # SMTP配置检查
-                if not st.session_state.smtp_configured or not smtp_email or not smtp_password:
+                # 获取侧边栏的SMTP配置
+                configured_smtp_email = st.session_state.get('smtp_email', '')
+                configured_smtp_password = st.session_state.get('smtp_password', '')
+
+                if not st.session_state.smtp_configured or not configured_smtp_email or not configured_smtp_password:
                     st.markdown(
                         '<div style="background-color: #FEF2F2; color: #991B1B; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">'                        
                         '<h3 style="font-size: 1.2rem; margin-bottom: 0.5rem;">⚠️ SMTP未配置</h3>'                        
@@ -580,75 +597,84 @@ with tab3:
                         unsafe_allow_html=True
                     )
                 else:
-                    # 配置SMTP
-                    smtp_config = configure_smtp(
-                        server=smtp_server,
-                        port=smtp_port,
-                        email=smtp_email,
-                        password=smtp_password,
-                        use_tls=use_tls
-                    )
-                    
-                    # 发送邮件控制面板
-                    st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">',
-                                unsafe_allow_html=True)
-                    
-                    if not st.session_state.sending:
-                        st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📤 开始发送</h3>', unsafe_allow_html=True)
-                        st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备向 <strong>{email_count}</strong> 个邮箱地址发送邮件</p>', unsafe_allow_html=True)
+                    # 确保使用最新的SMTP配置
+                    try:
+                        smtp_config = configure_smtp(
+                            server=smtp_server, # 从侧边栏获取
+                            port=smtp_port,     # 从侧边栏获取
+                            email=smtp_email,   # 从侧边栏获取
+                            password=smtp_password, # 从侧边栏获取
+                            use_tls=use_tls     # 从侧边栏获取
+                        )
+                    except Exception as e:
+                        st.error(f"SMTP配置加载失败，请重新测试配置: {str(e)}")
+                        smtp_config = None
+                        st.session_state.smtp_configured = False # 标记为未配置，阻止发送
+
+                    if smtp_config: # 只有当SMTP配置成功时才显示发送界面
+                        # 发送邮件控制面板
+                        st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">',
+                                    unsafe_allow_html=True)
                         
-                        # 发送邮件按钮
-                        send_col1, send_col2 = st.columns([3, 1])
-                        with send_col1:
-                            start_send = st.button('开始群发邮件', key='start_send', use_container_width=True)
-                        with send_col2:
-                            st.markdown(f'<div style="background-color: #DCFCE7; color: #166534; padding: 0.5rem; border-radius: 5px; text-align: center; margin-top: 0.2rem;">✓ SMTP已配置</div>', unsafe_allow_html=True)
+                        if not st.session_state.sending:
+                            st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📤 开始发送</h3>', unsafe_allow_html=True)
+                            st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备向 <strong>{email_count}</strong> 个邮箱地址发送邮件</p>', unsafe_allow_html=True)
+                            
+                            # 发送邮件按钮
+                            send_col1, send_col2 = st.columns([3, 1])
+                            with send_col1:
+                                start_send = st.button('开始群发邮件', key='start_send', use_container_width=True)
+                            with send_col2:
+                                st.markdown(f'<div style="background-color: #DCFCE7; color: #166534; padding: 0.5rem; border-radius: 5px; text-align: center; margin-top: 0.2rem;">✓ SMTP已配置</div>', unsafe_allow_html=True)
+                            
+                            if start_send:
+                                st.session_state.sending = True
+                                
+                                # 开始发送邮件
+                                with st.spinner('正在发送邮件...'):
+                                    send_log = send_bulk_email(
+                                        contacts=st.session_state.contacts,
+                                        smtp_config=smtp_config,
+                                        email_template=email_template,
+                                        email_subject=email_subject,
+                                        daily_limit=daily_limit,
+                                        interval_seconds=interval_seconds
+                                    )
+                                
+                                # 显示发送结果
+                                st.success('✅ 邮件发送完成！')
+                                
+                                # 显示发送统计
+                                success_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'success')
+                                failed_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'failed')
+                                
+                                st.markdown('<div style="display: flex; justify-content: space-around; margin: 1rem 0;">',
+                                            unsafe_allow_html=True)
+                                st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(send_log.index)}</span><br><span style="color: #64748B;">总计发送尝试</span></div>', unsafe_allow_html=True)
+                                st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #047857;">{success_count}</span><br><span style="color: #64748B;">成功</span></div>', unsafe_allow_html=True)
+                                st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #B91C1C;">{failed_count}</span><br><span style="color: #64748B;">失败</span></div>', unsafe_allow_html=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                # 显示发送日志
+                                st.markdown('<h4 style="color: #1E293B; font-size: 1rem; margin: 1rem 0;">📋 发送日志</h4>', unsafe_allow_html=True)
+                                st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+                                st.dataframe(send_log, use_container_width=True)
+                                st.markdown('</div>', unsafe_allow_html=True)
+                                
+                                # 导出日志按钮
+                                if st.button('导出发送日志', key='export_log'):
+                                    # 生成带时间戳的文件名
+                                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                    log_filename = f'email_log_{timestamp}.csv'
+                                    log_csv = send_log.to_csv(index=False).encode('utf-8')
+                                    log_b64 = base64.b64encode(log_csv).decode()
+                                    log_href = f'<a href="data:file/csv;base64,{log_b64}" download="{log_filename}" class="download-link" style="color: var(--primary-color); text-decoration: none;">点击下载 {log_filename}</a>'
+                                    st.markdown(f'✅ 日志已导出: {log_href}', unsafe_allow_html=True)
+                                
+                                st.session_state.sending = False
+                                st.experimental_rerun() # Refresh to clear sending state and allow re-sending
                         
-                        if start_send:
-                            st.session_state.sending = True
-                            
-                            # 开始发送邮件
-                            with st.spinner('正在发送邮件...'):
-                                send_log = send_bulk_email(
-                                    contacts=st.session_state.contacts,
-                                    smtp_config=smtp_config,
-                                    email_template=email_template,
-                                    email_subject=email_subject,
-                                    daily_limit=daily_limit,
-                                    interval_seconds=interval_seconds
-                                )
-                            
-                            # 显示发送结果
-                            st.success('✅ 邮件发送完成！')
-                            
-                            # 显示发送统计
-                            success_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'success')
-                            failed_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'failed')
-                            
-                            st.markdown('<div style="display: flex; justify-content: space-around; margin: 1rem 0;">',
-                                        unsafe_allow_html=True)
-                            st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(send_log)}</span><br><span style="color: #64748B;">总计</span></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #047857;">{success_count}</span><br><span style="color: #64748B;">成功</span></div>', unsafe_allow_html=True)
-                            st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #B91C1C;">{failed_count}</span><br><span style="color: #64748B;">失败</span></div>', unsafe_allow_html=True)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                            # 显示发送日志
-                            st.markdown('<h4 style="color: #1E293B; font-size: 1rem; margin: 1rem 0;">📋 发送日志</h4>', unsafe_allow_html=True)
-                            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-                            st.dataframe(send_log, use_container_width=True)
-                            st.markdown('</div>', unsafe_allow_html=True)
-                            
-                            # 导出日志按钮
-                            if st.button('导出发送日志', key='export_log'):
-                                # 生成带时间戳的文件名
-                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                log_filename = f'email_log_{timestamp}.csv'
-                                send_log.to_csv(log_filename, index=False)
-                                st.success(f'✅ 日志已导出到 {log_filename}')
-                            
-                            st.session_state.sending = False
-                    
-                    st.markdown('</div>', unsafe_allow_html=True)
+                        st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
                 # 邮件发送统计卡片
@@ -670,12 +696,13 @@ with tab3:
                 st.markdown('<li>适当设置发送间隔，避免被标记为垃圾邮件</li>', unsafe_allow_html=True)
                 st.markdown('<li>邮件模板中可使用变量个性化内容</li>', unsafe_allow_html=True)
                 st.markdown('<li>发送前检查邮件预览效果</li>', unsafe_allow_html=True)
+                st.markdown('<li>请勿用于发送垃圾邮件或非法活动</li>', unsafe_allow_html=True)
                 st.markdown('</ul>', unsafe_allow_html=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
 # 页脚
 st.markdown('<div class="footer" style="margin-top: 3rem; text-align: center; color: #64748B; padding-top: 1rem; border-top: 1px solid #E2E8F0;">', unsafe_allow_html=True)
-st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.0.0</p>', unsafe_allow_html=True)
+st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.0.1 (优化版)</p>', unsafe_allow_html=True)
 st.markdown(f'<p>© {datetime.now().year} All Rights Reserved</p>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
