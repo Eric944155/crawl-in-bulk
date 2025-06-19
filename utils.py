@@ -48,6 +48,10 @@ COMPILED_SOCIAL_PATTERNS = {
     for platform, patterns in SOCIAL_MEDIA_PATTERNS.items()
 }
 
+EMAIL_SUFFIX_WHITELIST = (
+    '.com', '.net', '.org', '.cn', '.io', '.co', '.edu', '.gov', '.info', '.biz', '.me', '.us', '.uk'
+)
+
 # 邮箱反爬归一化函数
 def normalize_email_text(text):
     """
@@ -94,35 +98,23 @@ def clean_url(url):
         url = 'http://' + url # 默认使用 http，requests 会自动重定向到 https
     return url
 
-# 从BeautifulSoup对象中提取邮箱
-def extract_contacts_from_soup(soup, base_url):
-    """
-    从BeautifulSoup对象中提取邮箱
-    """
-    emails = set()
-    # 只在正文和a标签查找
-    all_text = soup.get_text(separator=' ', strip=True)
-    emails.update(extract_valid_emails(all_text))
-    for a in soup.find_all('a', href=True):
-        href = normalize_email_text(a['href'])
-        if href.startswith('mailto:'):
-            emails.update(extract_valid_emails(href.replace('mailto:', '').split('?')[0]))
-        else:
-            emails.update(extract_valid_emails(href))
-    return list(emails)
-
 # 从文本中提取所有有效邮箱，自动归一化和严格校验。
 def extract_valid_emails(text):
     """
-    从文本中提取所有有效邮箱，自动归一化和严格校验。
+    只在含有邮箱关键词的文本中提取邮箱，并严格白名单过滤。
     """
     import re
     text = normalize_email_text(text)
-    # 严格邮箱正则
-    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}'
+    # 只保留含有邮箱关键词的行
+    lines = [line for line in text.split() if any(k in line for k in ['email', 'mail', 'outreach', 'contact', 'gmail', 'support', 'info', 'admin'])]
+    text = ' '.join(lines)
+    email_pattern = r'[a-zA-Z0-9._%+-]{3,64}@[a-zA-Z0-9.-]{2,64}\.[a-zA-Z]{2,10}'
     raw_emails = re.findall(email_pattern, text)
     emails = set()
     for email in raw_emails:
+        # 白名单后缀过滤
+        if not email.lower().endswith(EMAIL_SUFFIX_WHITELIST):
+            continue
         # 黑名单过滤
         if any(x in email for x in ['copyright', 'allrightsreserved', 'example.com', 'test@', 'noreply', 'no-reply']):
             continue
@@ -131,6 +123,24 @@ def extract_valid_emails(text):
             emails.add(valid.email)
         except EmailNotValidError:
             continue
+    return list(emails)
+
+# 从BeautifulSoup对象中提取邮箱
+def extract_contacts_from_soup(soup, base_url):
+    """
+    只在 mailto 和含邮箱关键词的文本段落查找邮箱。
+    """
+    emails = set()
+    # 只在a标签的mailto和含有邮箱关键词的文本段落查找
+    for a in soup.find_all('a', href=True):
+        href = normalize_email_text(a['href'])
+        if href.startswith('mailto:'):
+            emails.update(extract_valid_emails(href.replace('mailto:', '').split('?')[0]))
+    # 只在含有邮箱关键词的文本片段查找
+    for tag in soup.find_all(text=True):
+        txt = tag.strip()
+        if any(k in txt.lower() for k in ['email', 'mail', 'outreach', 'contact', 'gmail', 'support', 'info', 'admin']):
+            emails.update(extract_valid_emails(txt))
     return list(emails)
 
 # 从HTML中提取联系页面链接
