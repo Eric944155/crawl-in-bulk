@@ -170,6 +170,9 @@ if 'smtp_configured' not in st.session_state:
     st.session_state.smtp_configured = False
 if 'current_date' not in st.session_state:
     st.session_state.current_date = datetime.now().strftime("%Y-%m-%d")
+if 'selected_social_platforms' not in st.session_state: # 新增：用于存储选中的社交媒体平台
+    st.session_state.selected_social_platforms = []
+
 
 # 创建侧边栏
 with st.sidebar:
@@ -459,7 +462,7 @@ with tab2:
                 
                 st.session_state.crawling = False
                 st.rerun() # Refresh to show results immediately
-            
+
             st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
@@ -486,38 +489,80 @@ with tab2:
             st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
-            # Prepare contacts dataframe for display: flatten social_links dictionary for better display
+            # --- 社交媒体筛选逻辑 ---
+            # 1. 获取所有可能的社交媒体平台
+            all_possible_platforms = set()
+            for _, row in st.session_state.contacts.iterrows():
+                if isinstance(row['social_links'], dict):
+                    all_possible_platforms.update(row['social_links'].keys())
+            sorted_platforms = sorted(list(all_possible_platforms))
+
+            # 2. 创建多选下拉框
+            st.session_state.selected_social_platforms = st.multiselect(
+                '筛选社交媒体平台',
+                options=sorted_platforms,
+                default=st.session_state.selected_social_platforms, # 保持上次选择
+                help='选择要显示的社交媒体平台，不选择则显示所有已找到的平台。'
+            )
+
+            # 3. 准备用于显示的DataFrame
             display_df = st.session_state.contacts.copy()
             
-            # Convert social_links dict to a readable string for display
-            def format_social_links(social_dict):
+            # 4. 根据筛选器格式化 social_links_formatted 列
+            def format_social_links_filtered(social_dict, selected_platforms):
                 if not isinstance(social_dict, dict) or not social_dict:
                     return "无"
                 formatted_list = []
-                for platform, links in social_dict.items():
-                    if links:
-                        formatted_list.append(f"{platform}: " + ", ".join(links))
-                return "; ".join(formatted_list)
-            
-            display_df['social_links_formatted'] = display_df['social_links'].apply(format_social_links)
-            
-            # Drop original social_links column and rename the formatted one
-            display_df = display_df.drop(columns=['social_links'])
-            display_df = display_df.rename(columns={'social_links_formatted': '社交媒体链接'})
+                
+                # 如果没有选择任何平台，则显示所有已找到的平台
+                platforms_to_display = selected_platforms if selected_platforms else social_dict.keys()
 
+                for platform in platforms_to_display:
+                    if platform in social_dict and social_dict[platform]:
+                        # 创建可点击的链接
+                        links_html = []
+                        for link in social_dict[platform]:
+                            links_html.append(f'<a href="{link}" target="_blank">{link.split("//")[-1].split("/")[0]}</a>')
+                        
+                        formatted_list.append(f"<strong>{platform.capitalize()}</strong>: " + ", ".join(links_html))
+                
+                if not formatted_list:
+                    return "无 (未找到所选平台链接)"
+                return "<br>".join(formatted_list) # 使用<br>让每个平台占一行，更清晰
+            
+            display_df['社交媒体链接'] = display_df['social_links'].apply(
+                lambda x: format_social_links_filtered(x, st.session_state.selected_social_platforms)
+            )
+            
+            # 5. 过滤行：只显示至少包含一个选中社交媒体链接的网站
+            if st.session_state.selected_social_platforms:
+                display_df = display_df[
+                    display_df['social_links'].apply(
+                        lambda x: any(platform in x and x[platform] for platform in st.session_state.selected_social_platforms) if isinstance(x, dict) else False
+                    )
+                ]
+
+            # Drop original social_links column as it's replaced by formatted version
+            display_df = display_df.drop(columns=['social_links'])
+            
             # Custom column configuration for better readability
             column_config = {
                 "url": st.column_config.LinkColumn("网站链接"),
                 "emails": "邮箱地址",
                 "phones": "电话号码",
                 "contact_pages": "联系页面",
-                "社交媒体链接": "社交媒体链接",
+                "社交媒体链接": st.column_config.Column(
+                    "社交媒体链接",
+                    help="按平台分类展示的社交媒体链接",
+                    width="large"
+                ),
                 "error": "错误信息"
             }
 
             # 创建一个容器来包装数据框
             st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            st.dataframe(display_df, use_container_width=True, column_config=column_config)
+            # 使用 unsafe_allow_html=True 来渲染带链接的HTML字符串
+            st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
             st.markdown('</div>', unsafe_allow_html=True)
             
             # 导出功能
@@ -530,7 +575,8 @@ with tab2:
                 if st.button('导出数据', key='export_data', use_container_width=True):
                     # For export, transform social_links to JSON string for better CSV handling
                     export_df = st.session_state.contacts.copy()
-                    export_df['social_links'] = export_df['social_links'].apply(lambda x: str(x) if isinstance(x, dict) else x) # Convert dict to string for CSV
+                    # 确保 social_links 在导出时是字符串表示，方便CSV处理
+                    export_df['social_links'] = export_df['social_links'].apply(lambda x: str(x) if isinstance(x, dict) else x) 
                     
                     # Generate filename with timestamp
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -751,6 +797,6 @@ with tab3:
 
 # 页脚
 st.markdown('<div class="footer" style="margin-top: 3rem; text-align: center; color: #64748B; padding-top: 1rem; border-top: 1px solid #E2E8F0;">', unsafe_allow_html=True)
-st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.1.0 (增强精准版)</p>', unsafe_allow_html=True)
+st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.1.1 (社媒筛选优化)</p>', unsafe_allow_html=True)
 st.markdown(f'<p>© {datetime.now().year} All Rights Reserved</p>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
