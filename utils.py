@@ -1,6 +1,7 @@
 import re
 import validators
 import pandas as pd
+import io # 确保这里导入了io模块
 
 # 社交媒体域名列表
 SOCIAL_DOMAINS = [
@@ -35,11 +36,9 @@ def extract_contacts_from_text(text):
     emails = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w\.-]+', text)
     
     # 提取电话号码
-    # 新的正则表达式：匹配可选的+，然后是数字，
-    # 接着是7个或更多个数字、空格、破折号或括号，最后以数字结尾。
-    # 注意：在字符集[]中，-如果是字面字符，需要放在开头或结尾，或者转义。
-    # 这里我们使用 r'[\d\s\-\(\)]' 来明确匹配数字、空白、连字符、左括号和右括号。
-    phones = re.findall(r'\+?\d[\d\s\-\(\)]{7,}\d', text)
+    # *** 关键修改 1: 修正正则表达式，对特殊字符进行转义 ***
+    # 匹配可选的+，然后是数字，接着是7个或更多个数字、空白字符、连字符、左括号或右括号，最后以数字结尾。
+    phones = re.findall(r'\+?\d[\d\s\-\(\)]{7,}\d', text) #
     
     return list(set(emails)), list(set(phones))
 
@@ -87,31 +86,35 @@ def process_website_file(file):
     """
     处理上传的网站列表文件，返回标准化的DataFrame
     """
-    import io
-
-    # 尝试判断文件类型，优先使用文件名，如果file是StringIO对象则尝试读取内容判断
-    # 加载内容
-    file_content_decoded = None
-    if hasattr(file, 'name') and file.name.endswith('.csv'): #
-        df = pd.read_csv(file) #
-    elif hasattr(file, 'name') and file.name.endswith('.txt'): #
-        file_content_decoded = file.read().decode('utf-8', errors='ignore') #
-        urls = [line.strip() for line in file_content_decoded.splitlines() if line.strip()] #
-        df = pd.DataFrame({'URL': urls}) #
-    elif isinstance(file, io.StringIO): #  <--- 新增：针对手动输入场景
-        # 对于StringIO，我们假定它是txt格式的网址列表
-        file_content_decoded = file.read() # StringIO已经包含解码后的字符串
-        urls = [line.strip() for line in file_content_decoded.splitlines() if line.strip()]
+    # 无需再次导入io，因为它已经在文件顶部导入
+    df = None # 初始化df，以防没有任何条件匹配
+    
+    # *** 关键修改 2: 增加对 StringIO 对象的处理，并使用 hasattr 检查 'name' 属性 ***
+    if hasattr(file, 'name') and file.name.endswith('.csv'):
+        df = pd.read_csv(file)
+    elif hasattr(file, 'name') and file.name.endswith('.txt'):
+        # 对于txt文件，读取并解码
+        content = file.read().decode('utf-8', errors='ignore')
+        urls = [line.strip() for line in content.splitlines() if line.strip()]
+        df = pd.DataFrame({'URL': urls})
+    elif isinstance(file, io.StringIO): # 专门处理StringIO对象（例如手动输入）
+        # 对于StringIO，它已经是字符串内容，无需解码
+        content = file.read()
+        urls = [line.strip() for line in content.splitlines() if line.strip()]
         df = pd.DataFrame({'URL': urls})
     else:
-        raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件")
+        raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件，或提供有效的网址字符串。")
+
+    # 如果df仍然为None，表示没有有效内容被处理
+    if df is None or df.empty:
+        raise ValueError("未能从文件中解析出有效数据。请检查文件内容或格式。")
 
     # 尝试识别URL列
     if 'URL' not in df.columns:
         if len(df.columns) == 1:
             df.columns = ['URL']
         else:
-            raise ValueError("CSV文件中未找到URL列")
+            raise ValueError("CSV文件中未找到URL列，或者文件中包含多列但没有名为'URL'的列。")
 
     # 清理 + 验证URL
     cleaned_urls = []

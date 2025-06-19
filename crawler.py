@@ -19,7 +19,8 @@ def crawl_contacts(websites):
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            response = requests.get(url, headers=headers, timeout=10, verify=False) # 添加 verify=False
+            # *** 关键修改 1: 添加 verify=False ***
+            response = requests.get(url, headers=headers, timeout=10, verify=False) # 
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # 提取邮箱和电话
@@ -35,7 +36,8 @@ def crawl_contacts(websites):
             if contact_pages:
                 for contact_page in contact_pages[:1]:  # 只爬取第一个联系页面
                     try:
-                        contact_response = requests.get(contact_page, headers=headers, timeout=10, verify=False) # 添加 verify=False
+                        # *** 关键修改 2: 添加 verify=False ***
+                        contact_response = requests.get(contact_page, headers=headers, timeout=10, verify=False) # 
                         contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
                         
                         # 提取联系页面中的邮箱和电话
