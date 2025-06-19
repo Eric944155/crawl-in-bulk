@@ -37,7 +37,6 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
     - email_template: 邮件模板字符串
     - email_subject: 邮件主题字符串
     - daily_limit: 每日发送上限
-    - interval_seconds: 两封邮件之间的间隔秒数
     """
     # 默认SMTP配置
     if smtp_config is None:
@@ -199,4 +198,9 @@ def configure_smtp(server, port, email, password, use_tls=True):
         raise Exception(f"SMTP配置验证失败: {str(e)}")
 
 # 自定义邮件模板的函数 (保持不变)
-def create_email_template(subject_
+def create_email_template(subject, body):
+    """
+    创建邮件模板，可以根据需求自定义
+    """
+    # 这里只是一个示例，您可以根据需要扩展模板功能
+    return f"Subject: {subject}\n\n{body}"
