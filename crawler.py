@@ -1,7 +1,7 @@
 import time
 import requests
 from bs4 import BeautifulSoup
-from .utils import extract_contacts_from_soup, extract_social_links, get_rendered_html
+from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html
 import pandas as pd
 
 # 强化邮箱抓取，移除电话，结构极简
