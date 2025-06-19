@@ -458,7 +458,7 @@ with tab2:
                     status_text.markdown('<p style="color: #B91C1C; font-weight: bold;">⚠️ 爬取完成，但未找到任何联系方式</p>', unsafe_allow_html=True)
                 
                 st.session_state.crawling = False
-                st.experimental_rerun() # Refresh to show results immediately
+                st.rerun() # Refresh to show results immediately
             
             st.markdown('</div>', unsafe_allow_html=True)
         
@@ -720,7 +720,7 @@ with tab3:
                                     st.markdown(f'✅ 日志已导出: {log_href}', unsafe_allow_html=True)
                                 
                                 st.session_state.sending = False
-                                st.experimental_rerun() # Refresh to clear sending state and allow re-sending
+                                st.rerun() # Refresh to clear sending state and allow re-sending
                         
                         st.markdown('</div>', unsafe_allow_html=True)
             
