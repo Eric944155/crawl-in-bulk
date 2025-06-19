@@ -6,6 +6,7 @@ from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
 import selenium
 from selenium import webdriver
+from email_validator import validate_email, EmailNotValidError
 
 # 社交媒体域名和对应的平台名称映射
 # 优化：更全面，更精准的匹配模式
@@ -99,16 +100,37 @@ def extract_contacts_from_soup(soup, base_url):
     从BeautifulSoup对象中提取邮箱
     """
     emails = set()
-    all_text = normalize_email_text(soup.get_text(separator=' '))
-    # a标签
+    # 只在正文和a标签查找
+    all_text = soup.get_text(separator=' ', strip=True)
+    emails.update(extract_valid_emails(all_text))
     for a in soup.find_all('a', href=True):
         href = normalize_email_text(a['href'])
         if href.startswith('mailto:'):
-            emails.add(href.replace('mailto:', '').split('?')[0].strip())
+            emails.update(extract_valid_emails(href.replace('mailto:', '').split('?')[0]))
         else:
-            emails.update(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}', href))
-    # 文本中正则提取
-    emails.update(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}', all_text))
+            emails.update(extract_valid_emails(href))
+    return list(emails)
+
+# 从文本中提取所有有效邮箱，自动归一化和严格校验。
+def extract_valid_emails(text):
+    """
+    从文本中提取所有有效邮箱，自动归一化和严格校验。
+    """
+    import re
+    text = normalize_email_text(text)
+    # 严格邮箱正则
+    email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}'
+    raw_emails = re.findall(email_pattern, text)
+    emails = set()
+    for email in raw_emails:
+        # 黑名单过滤
+        if any(x in email for x in ['copyright', 'allrightsreserved', 'example.com', 'test@', 'noreply', 'no-reply']):
+            continue
+        try:
+            valid = validate_email(email, check_deliverability=False)
+            emails.add(valid.email)
+        except EmailNotValidError:
+            continue
     return list(emails)
 
 # 从HTML中提取联系页面链接
