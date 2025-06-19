@@ -4,9 +4,9 @@ import time
 import os
 import base64
 from datetime import datetime
-from crawler import crawl_contacts #
-from mailer import send_bulk_email, configure_smtp, DEFAULT_EMAIL_TEMPLATE #
-from utils import process_website_file #
+from crawler import crawl_contacts
+from mailer import send_bulk_email, configure_smtp, DEFAULT_EMAIL_TEMPLATE
+from utils import process_website_file
 
 # 设置页面配置
 st.set_page_config(
@@ -125,7 +125,7 @@ def local_css():
             background-color: white;
             border-radius: 10px;
             padding: 1.5rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);\
             text-align: center;
             height: 100%;
         }
@@ -147,15 +147,6 @@ def local_css():
         .stTextInput>div>div>input, .stTextArea>div>div>textarea {
             border-radius: 5px;
             border: 1px solid #E2E8F0;
-        }
-        /* DataFrame中的文本换行，特别是针对social_links列 */
-        div[data-testid="stDataFrame"] .row-header {
-            white-space: normal !important;
-            word-wrap: break-word !important;
-        }
-        div[data-testid="stDataFrame"] div.st-ce {
-            white-space: pre-wrap !important; /* 保持换行符 */
-            word-wrap: break-word !important; /* 强制单词换行 */
         }
     </style>
     """, unsafe_allow_html=True)
@@ -213,7 +204,7 @@ with st.sidebar:
                     email=smtp_email,
                     password=smtp_password,
                     use_tls=use_tls
-                ) #
+                )
             st.success('SMTP 配置成功!')
             st.session_state.smtp_configured = True
         except Exception as e:
@@ -252,13 +243,11 @@ with st.sidebar:
     with col2:
         contact_count = 0
         if st.session_state.contacts is not None:
-            # 统计有多少行有至少一个邮箱
-            email_rows_count = st.session_state.contacts['emails'].apply(lambda x: len(x) > 0 if isinstance(x, list) else False).sum()
-            contact_count = email_rows_count # 这里的联系人计数更准确地指代可发送邮件的网站数量
+            contact_count = len(st.session_state.contacts)
         st.markdown(
             f'<div class="metric-card" style="padding: 1rem;">'            
             f'<p class="metric-value">{contact_count}</p>'            
-            f'<p class="metric-label">可发送联系人</p>'            
+            f'<p class="metric-label">已获取联系人</p>'            
             f'</div>',            
             unsafe_allow_html=True
         )
@@ -309,7 +298,7 @@ with tab1:
             try:
                 # 处理上传的文件
                 with st.spinner('正在处理文件...'):
-                    websites_df = process_website_file(uploaded_file) #
+                    websites_df = process_website_file(uploaded_file)
                     st.session_state.websites = websites_df
                 st.success(f'✅ 成功导入 {len(websites_df)} 个有效网址')
             except Exception as e:
@@ -342,7 +331,7 @@ with tab1:
                                     file_content = StringIO(file_content_string)
                             
                                     # 直接将StringIO对象传递给process_website_file函数
-                                    websites_df = process_website_file(file_content) #
+                                    websites_df = process_website_file(file_content)
                                     st.session_state.websites = websites_df
                                     st.success(f'✅ 成功添加 {len(websites_df)} 个有效网址')
                                 except Exception as e:
@@ -367,7 +356,6 @@ with tab1:
         # 添加清除按钮
         if st.button('清除网址列表', key='clear_websites'):
             st.session_state.websites = None
-            st.session_state.contacts = None # 清除网站列表时，也清除联系人数据
             st.rerun()
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -404,7 +392,7 @@ with tab2:
             
             if not st.session_state.crawling:
                 st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">🔍 开始爬取</h3>', unsafe_allow_html=True)
-                st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备爬取 <strong>{len(st.session_state.websites)}</strong> 个网站的联系方式</p>', unsafe_allow_html=True)
+                st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备爬取 {len(st.session_state.websites)} 个网站的联系方式</p>', unsafe_allow_html=True)
                 
                 # 爬取按钮
                 start_crawl = st.button('开始爬取联系方式', key='start_crawl', use_container_width=True)
@@ -431,8 +419,8 @@ with tab2:
                     
                     # 爬取单个网站
                     try:
-                        site_contacts_df = crawl_contacts(single_site) #
-                        contacts.append(site_contacts_df)
+                        site_contacts = crawl_contacts(single_site)
+                        contacts.append(site_contacts)
                         time.sleep(0.5) # 短暂延迟，避免请求过快
                     except Exception as e:
                         st.error(f"爬取 {row['URL']} 时出错: {str(e)}")
@@ -483,19 +471,9 @@ with tab2:
             st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
-            # --- 社交媒体链接显示优化 ---
-            # 创建一个副本以避免修改原始session_state.contacts
-            display_contacts_df = st.session_state.contacts.copy()
-            # 将 social_links 列表转换为换行符分隔的字符串
-            if 'social_links' in display_contacts_df.columns:
-                display_contacts_df['social_links'] = display_contacts_df['social_links'].apply(
-                    lambda x: "\n".join(x) if isinstance(x, list) and x else ""
-                )
-            # --- 结束优化 ---
-
             # 创建一个容器来包装数据框
             st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            st.dataframe(display_contacts_df, use_container_width=True)
+            st.dataframe(st.session_state.contacts, use_container_width=True)
             st.markdown('</div>', unsafe_allow_html=True)
             
             # 导出功能
@@ -505,10 +483,11 @@ with tab2:
                     # 生成带时间戳的文件名
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     export_filename = f'contacts_{timestamp}.csv'
-                    # 导出时，保持原始的列表形式，或者根据需要转换为字符串
-                    # 这里为了兼容性，依然导出原始数据（如果有修改过的DataFrame，需要确保导出的是你想要的）
-                    csv = st.session_state.contacts.to_csv(index=False).encode('utf-8')
-                    b64 = base64.b64encode(csv).decode()
+                    st.session_state.contacts.to_csv(export_filename, index=False)
+                    
+                    # 创建下载链接
+                    csv = st.session_state.contacts.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
                     href = f'<a href="data:file/csv;base64,{b64}" download="{export_filename}" class="download-link">点击下载 {export_filename}</a>'
                     
                     export_col2.markdown(f'✅ 数据已导出: {href}', unsafe_allow_html=True)
@@ -581,13 +560,12 @@ with tab3:
                 
                 # 邮件模板
                 st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">邮件内容模板</p>', unsafe_allow_html=True)
-                st.markdown('<p style="color: #64748B; font-size: 0.8rem; margin-bottom: 0.5rem;">可使用以下变量: {website_name} (自动从URL提取), {contact_name} (需自行补充，目前无此变量)</p>', unsafe_allow_html=True)
-                email_template = st.text_area('', DEFAULT_EMAIL_TEMPLATE, height=300, label_visibility="collapsed") #
+                st.markdown('<p style="color: #64748B; font-size: 0.8rem; margin-bottom: 0.5rem;">可使用以下变量: {company_name}, {website}, {contact_name}</p>', unsafe_allow_html=True)
+                email_template = st.text_area('', DEFAULT_EMAIL_TEMPLATE, height=300, label_visibility="collapsed")
                 
                 # 模板预览
                 with st.expander("📝 模板预览"):
-                    # 这里的预览使用了 DEFAULT_EMAIL_TEMPLATE 里的变量，可以根据你的需求调整
-                    preview_template = email_template.replace('{website_name}', '示例公司网站').replace('{contact_name}', '张经理')
+                    preview_template = email_template.replace('{company_name}', '示例公司').replace('{website}', 'www.example.com').replace('{contact_name}', '张经理')
                     st.markdown(f"<div style='background-color: #F8FAFC; padding: 1rem; border-radius: 5px;'>{preview_template}</div>", unsafe_allow_html=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -609,7 +587,7 @@ with tab3:
                         email=smtp_email,
                         password=smtp_password,
                         use_tls=use_tls
-                    ) #
+                    )
                     
                     # 发送邮件控制面板
                     st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">',
@@ -630,25 +608,16 @@ with tab3:
                             st.session_state.sending = True
                             
                             # 开始发送邮件
-                            send_status_text = st.empty() # 用于显示发送进度
-                            progress_bar_send = st.progress(0) # 用于显示发送进度条
+                            with st.spinner('正在发送邮件...'):
+                                send_log = send_bulk_email(
+                                    contacts=st.session_state.contacts,
+                                    smtp_config=smtp_config,
+                                    email_template=email_template,
+                                    email_subject=email_subject,
+                                    daily_limit=daily_limit,
+                                    interval_seconds=interval_seconds
+                                )
                             
-                            send_log = send_bulk_email(
-                                contacts=st.session_state.contacts,
-                                smtp_config=smtp_config,
-                                email_template=email_template,
-                                email_subject=email_subject,
-                                daily_limit=daily_limit,
-                                interval_seconds=interval_seconds,
-                                progress_callback=lambda current, total, recipient: \
-                                    (progress_bar_send.progress(current / total), \
-                                     send_status_text.markdown(f'<p style="color: #4F6DF5;">正在发送 {current}/{total}: <strong>{recipient}</strong></p>', unsafe_allow_html=True))
-                            ) #
-                            
-                            # 清除进度显示
-                            progress_bar_send.empty()
-                            send_status_text.empty()
-
                             # 显示发送结果
                             st.success('✅ 邮件发送完成！')
                             
@@ -658,7 +627,7 @@ with tab3:
                             
                             st.markdown('<div style="display: flex; justify-content: space-around; margin: 1rem 0;">',
                                         unsafe_allow_html=True)
-                            st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(send_log)}</span><br><span style="color: #64748B;">总计尝试</span></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(send_log)}</span><br><span style="color: #64748B;">总计</span></div>', unsafe_allow_html=True)
                             st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #047857;">{success_count}</span><br><span style="color: #64748B;">成功</span></div>', unsafe_allow_html=True)
                             st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #B91C1C;">{failed_count}</span><br><span style="color: #64748B;">失败</span></div>', unsafe_allow_html=True)
                             st.markdown('</div>', unsafe_allow_html=True)
@@ -674,10 +643,8 @@ with tab3:
                                 # 生成带时间戳的文件名
                                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                                 log_filename = f'email_log_{timestamp}.csv'
-                                csv_log = send_log.to_csv(index=False).encode('utf-8')
-                                b64_log = base64.b64encode(csv_log).decode()
-                                href_log = f'<a href="data:file/csv;base64,{b64_log}" download="{log_filename}" class="download-link">点击下载 {log_filename}</a>'
-                                st.markdown(f'✅ 日志已导出: {href_log}', unsafe_allow_html=True)
+                                send_log.to_csv(log_filename, index=False)
+                                st.success(f'✅ 日志已导出到 {log_filename}')
                             
                             st.session_state.sending = False
                     

@@ -4,11 +4,10 @@ import pandas as pd
 from email.message import EmailMessage
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import random # 导入 random 模块
 
 # 邮件模板
 DEFAULT_EMAIL_TEMPLATE = """
-尊敬的{company_or_website_name}团队：
+尊敬的{website_name}团队：
 
 您好！
 
@@ -27,7 +26,7 @@ DEFAULT_EMAIL_TEMPLATE = """
 """
 
 # 群发邮件的函数
-def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subject=None, daily_limit=50, interval_seconds=60):
+def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit=50, interval_seconds=60):
     """
     群发邮件函数
     
@@ -35,8 +34,8 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
     - contacts: 包含联系方式的DataFrame
     - smtp_config: SMTP服务器配置字典
     - email_template: 邮件模板字符串
-    - email_subject: 邮件主题字符串
     - daily_limit: 每日发送上限
+    - interval_seconds: 两封邮件之间的间隔秒数
     """
     # 默认SMTP配置
     if smtp_config is None:
@@ -61,7 +60,6 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
     success_count = 0
     error_count = 0
     
-    server = None # 初始化 server 变量
     try:
         # 创建SMTP连接
         if smtp_config['use_tls']:
@@ -78,13 +76,25 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
             if not hasattr(contact, 'emails') or not contact.emails:
                 continue
             
-            # 获取网站名称和公司名称
+            # 检查是否达到每日上限
+            if sent_count >= daily_limit:
+                print(f"已达到每日发送上限 {daily_limit} 封")
+                # 记录停止发送的日志
+                log_entry = pd.DataFrame([{
+                    'url': 'N/A', # 没有具体的URL，表示是停止发送的事件
+                    'recipient': 'N/A',
+                    'status': 'stopped',
+                    'error': f'Daily send limit ({daily_limit}) reached.',
+                    'timestamp': pd.Timestamp.now()
+                }])
+                send_log = pd.concat([send_log, log_entry], ignore_index=True)
+                break
+            
+            # 获取网站名称（从URL中提取）
             website_name = contact.url.split('//')[1].split('/')[0]
             if website_name.startswith('www.'):
                 website_name = website_name[4:]
-
-            company_or_website_name = contact.company_name if contact.company_name else website_name
-
+            
             # 为每个邮箱发送邮件
             for email in contact.emails:
                 # 再次检查是否达到每日上限，以防在遍历内层循环时超出
@@ -102,17 +112,13 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
                 
                 # 创建邮件
                 msg = MIMEMultipart()
-                
-                # 使用传入的主题，如果没有则构建一个
-                subject = email_subject if email_subject else f'关于与{company_or_website_name}的合作机会'
-                msg['Subject'] = subject
+                msg['Subject'] = f'关于与{website_name}的合作机会'
                 msg['From'] = smtp_config['email']
                 msg['To'] = email
                 
                 # 替换模板中的变量
                 email_content = email_template.format(
                     website_name=website_name,
-                    company_or_website_name=company_or_website_name, # 新增的变量
                     # 可以添加更多变量，如 {contact_name}，但需要爬取时获取
                     # {company_name} 也可以通过 website_name 来近似
                 )
@@ -128,7 +134,7 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
                     success_count += 1
                     print(f'邮件发送成功: {contact.url} -> {email}')
                 except Exception as e:
-                    status = 'failed' # 更改为 'failed' 更明确
+                    status = 'error'
                     error_msg = str(e)
                     error_count += 1
                     print(f'邮件发送失败: {contact.url} -> {email}, 错误: {e}')
@@ -146,16 +152,15 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
                 # 增加计数器
                 sent_count += 1
                 
-                # 间隔发送，避免被封，增加随机性
-                time.sleep(interval_seconds + random.uniform(0.5, 2.0))
+                # 间隔发送，避免被封
+                time.sleep(interval_seconds)
             
             # 如果内层循环因为达到上限而跳出，外层循环也应跳出
             if sent_count >= daily_limit:
                 break
         
         # 关闭连接
-        if server: # 确保server存在再关闭
-            server.quit()
+        server.quit()
         
     except Exception as e:
         print(f"SMTP连接或发送过程中发生错误: {e}")
@@ -170,6 +175,9 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, email_subje
     
     # 打印发送统计
     print(f"\n发送统计:\n总计: {sent_count}\n成功: {success_count}\n失败: {error_count}")
+    
+    # 保存发送日志
+    # send_log.to_csv('email_send_log.csv', index=False) # 暂时不自动保存，由前端控制导出
     
     return send_log
 
@@ -197,10 +205,12 @@ def configure_smtp(server, port, email, password, use_tls=True):
     except Exception as e:
         raise Exception(f"SMTP配置验证失败: {str(e)}")
 
-# 自定义邮件模板的函数 (保持不变)
-def create_email_template(subject, body):
+# 自定义邮件模板的函数
+def create_email_template(subject_template, body_template):
     """
-    创建邮件模板，可以根据需求自定义
+    创建自定义邮件模板
     """
-    # 这里只是一个示例，您可以根据需要扩展模板功能
-    return f"Subject: {subject}\n\n{body}"
+    return {
+        'subject': subject_template,
+        'body': body_template
+    }
