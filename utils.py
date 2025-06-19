@@ -59,36 +59,103 @@ EMAIL_KEYWORDS = [
     'gmail', '163', 'qq', 'yahoo', 'outlook', 'edu', 'org', 'net', 'com'
 ]
 EMAIL_BLACKLIST = [
+    # 常见的非真实邮箱关键词
     'copyright', 'allrightsreserved', 'example.com', 'test@', 'noreply', 'no-reply', 'donotreply', 'do-not-reply',
-    'webmaster@', 'admin@', 'root@', 'abuse@', 'hostmaster@', 'postmaster@'
+    'webmaster@', 'admin@', 'root@', 'abuse@', 'hostmaster@', 'postmaster@',
+    
+    # 版权和设计相关
+    'designedby', 'designedand', 'developedby', 'designedanddevelopedby', 'allrights', 'reserved',
+    'poweredby', 'createdby', 'maintainedby', 'hostedby', 'madeby', 'builtby',
+    
+    # 年份组合
+    '2020-', '2021-', '2022-', '2023-', '2024-', '2025-', '-2020', '-2021', '-2022', '-2023', '-2024', '-2025',
+    
+    # 社交媒体相关
+    'facebook', 'twitter', 'instagram', 'linkedin', 'youtube', 'pinterest', 'snapchat', 'tiktok',
+    
+    # 明显的非邮箱域名
+    'designedand.developedby', 'allrights.reserved', 'all.rightsreserved'
 ]
 
 def is_valid_email(email):
-    if not isinstance(email, str) or len(email) < 6 or len(email) > 64:
+    # 1. 基本格式检查
+    if not email or not isinstance(email, str):
         return False
-    email = email.lower()
-    if any(bad in email for bad in EMAIL_BLACKLIST):
+    
+    # 2. 长度检查 (RFC 5321)
+    if len(email) < 5 or len(email) > 254:
         return False
-    if not any(email.endswith('@' + d) or email.endswith('.' + d) for d in EMAIL_DOMAIN_WHITELIST):
+    
+    # 3. 黑名单检查 - 检查是否包含任何黑名单关键词
+    email_lower = email.lower()
+    if any(b in email_lower for b in EMAIL_BLACKLIST):
         return False
+    
+    # 4. 基本结构检查
+    parts = email.split('@')
+    if len(parts) != 2:
+        return False
+    
+    username, domain = parts[0], parts[1].lower()
+    
+    # 5. 用户名检查
+    if not username or len(username) > 64:
+        return False
+    
+    # 6. 域名检查
+    if not domain or len(domain) > 255 or '.' not in domain:
+        return False
+    
+    # 7. 域名白名单检查 - 检查TLD、SLD或完整域名是否在白名单中
+    domain_parts = domain.split('.')
+    tld = domain_parts[-1] if domain_parts else ''
+    
+    # 检查顶级域名
+    tld_match = any(w == tld for w in EMAIL_DOMAIN_WHITELIST)
+    
+    # 检查二级域名+顶级域名组合
+    sld_tld = '.'.join(domain_parts[-2:]) if len(domain_parts) >= 2 else ''
+    sld_match = any(w == sld_tld for w in EMAIL_DOMAIN_WHITELIST)
+    
+    # 检查完整域名
+    full_match = any(w == domain for w in EMAIL_DOMAIN_WHITELIST)
+    
+    if not (tld_match or sld_match or full_match):
+        return False
+    
+    # 8. 使用email_validator进行严格验证
     try:
         from email_validator import validate_email, EmailNotValidError
-        validate_email(email, check_deliverability=False)
+        validate_email(email, check_deliverability=False)  # 不检查MX记录，只验证格式
         return True
+    except (EmailNotValidError, ImportError):
+        return False
     except Exception:
+        # 捕获其他可能的异常
         return False
 
 def extract_valid_emails(text):
     import re
     text = normalize_email_text(text)
-    lines = [line for line in text.split() if any(k in line.lower() for k in EMAIL_KEYWORDS)]
-    text = ' '.join(lines)
-    email_pattern = r'[a-zA-Z0-9._%+-]{3,64}@[a-zA-Z0-9.-]{2,64}\.[a-zA-Z]{2,10}'
+    
+    # 预处理：移除可能导致误匹配的字符串
+    text = re.sub(r'\d{4}@\d{4}', '', text)  # 移除类似 2025@2020 这样的年份组合
+    text = re.sub(r'copyright|allrightsreserved|designedanddevelopedby', ' ', text, flags=re.I)  # 移除常见的版权信息
+    
+    # 更精确的邮箱正则表达式
+    # 用户名部分：允许字母、数字、点、下划线、百分号、加号、减号
+    # 域名部分：要求至少有一个点，且顶级域名为2-10个字母
+    email_pattern = r'[a-zA-Z0-9][a-zA-Z0-9._%+-]{2,63}@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,10}'
+    
+    # 查找所有可能的邮箱
     raw_emails = re.findall(email_pattern, text)
+    
+    # 验证并过滤
     emails = set()
     for email in raw_emails:
         if is_valid_email(email):
             emails.add(email)
+    
     return list(emails)
 
 # 邮箱反爬归一化函数
@@ -96,22 +163,64 @@ def normalize_email_text(text):
     """
     将各种反爬邮箱写法归一化为标准邮箱格式。
     支持多种混淆写法，如 [at]、(at)、{at}、#at#、-at-、&commat;、＠、[dot]、(dot)、{dot}、#dot#、-dot-、·、点、等。
+    同时移除可能导致误匹配的内容，如版权信息、年份组合等。
     """
-    import re
+    import re, html
     if not text or not isinstance(text, str):
         return ''
+    
+    # 1. 预处理：移除可能导致误匹配的内容
+    # 移除版权信息
+    text = re.sub(r'©\s*\d{4}[-–]?\d{0,4}', ' ', text)
+    text = re.sub(r'copyright\s*\d{4}[-–]?\d{0,4}', ' ', text, flags=re.I)
+    text = re.sub(r'all\s*rights\s*reserved', ' ', text, flags=re.I)
+    
+    # 移除设计和开发信息
+    text = re.sub(r'designed\s*(and|&)\s*developed\s*by', ' ', text, flags=re.I)
+    text = re.sub(r'powered\s*by', ' ', text, flags=re.I)
+    text = re.sub(r'created\s*by', ' ', text, flags=re.I)
+    
+    # 移除年份组合（可能被误识别为邮箱）
+    text = re.sub(r'\d{4}[-–]\d{4}', ' ', text)
+    
+    # 2. 移除HTML实体和标签
+    text = html.unescape(text)  # 解码HTML实体
+    text = re.sub(r'<[^>]+>', ' ', text)  # 移除HTML标签
+    
+    # 3. 处理各种混淆的邮箱格式
     patterns = [
+        # 基本的混淆替换
         (r'\s?\[at\]\s?|\s?\(at\)\s?|\s?\{at\}\s?|\s?\-at\-|\s?\#at\#|\s?\&commat;|\s?＠|\s?@\s?', '@'),
         (r'\s?\[dot\]\s?|\s?\(dot\)\s?|\s?\{dot\}\s?|\s?\-dot\-|\s?\#dot\#|\s?·|\s?点|\s?\.\s?', '.'),
         (r'\s?\[underscore\]\s?|\s?\(underscore\)\s?|\s?\_\s?', '_'),
         (r'\s?\[dash\]\s?|\s?\(dash\)\s?|\s?\-\s?', '-'),
         (r'\s?\[plus\]\s?|\s?\(plus\)\s?|\s?\+\s?', '+'),
         (r'\s?\[at symbol\]\s?', '@'),
+        
+        # 更多的混淆模式
+        (r'\s+at\s+', '@'),  # 空格分隔的 at
+        (r'\s+dot\s+', '.'),  # 空格分隔的 dot
+        (r'\s+AT\s+', '@'),  # 大写的 AT
+        (r'\s+DOT\s+', '.'),  # 大写的 DOT
+        (r'\s+At\s+', '@'),  # 首字母大写的 At
+        (r'\s+Dot\s+', '.'),  # 首字母大写的 Dot
+        
+        # HTML编码的替换
+        (r'&#64;|&#0064;|&#x40;|&#x0040;', '@'),  # @ 的 HTML 编码
+        (r'&#46;|&#0046;|&#x2e;|&#x002e;', '.'),  # . 的 HTML 编码
     ]
-    text = text.lower()
+    
+    # 应用所有模式
     for pat, repl in patterns:
         text = re.sub(pat, repl, text, flags=re.I)
-    text = re.sub(r'\s+', '', text)
+    
+    # 4. 处理更复杂的混淆模式
+    # 处理形如 "name at domain dot com" 的格式
+    text = re.sub(r'([a-zA-Z0-9._%+-]+)\s+(?:at|AT|At)\s+([a-zA-Z0-9.-]+)\s+(?:dot|DOT|Dot)\s+([a-zA-Z]{2,10})', r'\1@\2.\3', text)
+    
+    # 5. 移除多余空白并转为小写
+    text = re.sub(r'\s+', ' ', text).strip().lower()
+    
     return text
 
 # 验证URL格式
@@ -139,21 +248,47 @@ def clean_url(url):
 
 def extract_contacts_from_soup(soup, base_url):
     emails = set()
-    # 1. 只在 mailto 提取
+    
+    # 1. 首先从mailto链接中提取邮箱（最可靠的来源）
     for a in soup.find_all('a', href=True):
         href = normalize_email_text(a['href'])
         if href.startswith('mailto:'):
-            emails.update(extract_valid_emails(href.replace('mailto:', '').split('?')[0]))
-    # 2. 如果 mailto 没有，再在正文“强信号”区域查找
+            clean_email = href.replace('mailto:', '').split('?')[0].strip()
+            if '@' in clean_email:
+                emails.update(extract_valid_emails(clean_email))
+    
+    # 2. 从页脚区域排除版权信息
+    footer_tags = soup.find_all(['footer', 'div', 'section'], class_=lambda c: c and any(x in str(c).lower() for x in ['footer', 'copyright', 'bottom']))
+    for footer in footer_tags:
+        footer.decompose()  # 从DOM中移除页脚元素
+    
+    # 3. 如果mailto没有找到邮箱，在联系相关区域查找
     if not emails:
-        allowed_tags = ['p', 'span', 'div', 'li', 'td', 'address', 'section', 'article', 'main']
-        for tag in soup.find_all(allowed_tags):
-            txt = tag.get_text(separator=' ', strip=True)
-            if any(k in txt.lower() for k in EMAIL_KEYWORDS):
-                emails.update(extract_valid_emails(txt))
-    # 3. 去重、去空、去伪邮箱
-    emails = {e for e in emails if is_valid_email(e)}
-    return list(emails)
+        # 首先尝试找到联系相关区域
+        contact_sections = soup.find_all(['div', 'section', 'article'], id=lambda i: i and any(x in str(i).lower() for x in ['contact', 'about']))
+        contact_sections += soup.find_all(['div', 'section', 'article'], class_=lambda c: c and any(x in str(c).lower() for x in ['contact', 'about']))
+        
+        # 如果找到联系区域，优先在这些区域查找
+        search_areas = contact_sections if contact_sections else soup
+        
+        # 在确定的区域中查找可能包含邮箱的元素
+        allowed_tags = ['p', 'span', 'div', 'li', 'td', 'address', 'section', 'article', 'main', 'a']
+        for area in (search_areas if isinstance(search_areas, list) else [search_areas]):
+            for tag in area.find_all(allowed_tags):
+                txt = tag.get_text(separator=' ', strip=True)
+                # 只处理可能包含邮箱的文本
+                if '@' in txt and any(k in txt.lower() for k in EMAIL_KEYWORDS):
+                    # 排除明显的版权信息
+                    if not any(x in txt.lower() for x in ['copyright', 'all rights reserved', '©']):
+                        emails.update(extract_valid_emails(txt))
+    
+    # 4. 去重、验证邮箱
+    valid_emails = set()
+    for email in emails:
+        if is_valid_email(email):
+            valid_emails.add(email)
+    
+    return list(valid_emails)
 
 # 从HTML中提取联系页面链接
 def extract_contact_pages(soup, base_url):
