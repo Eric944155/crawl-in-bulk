@@ -85,15 +85,22 @@ def process_website_file(file):
     """
     import io
 
+    # 尝试判断文件类型，优先使用文件名，如果file是StringIO对象则尝试读取内容判断
     # 加载内容
-    if file.name.endswith('.csv'):
-        df = pd.read_csv(file)
-    elif file.name.endswith('.txt'):
-        content = file.read().decode('utf-8', errors='ignore')
-        urls = [line.strip() for line in content.splitlines() if line.strip()]
+    file_content_decoded = None
+    if hasattr(file, 'name') and file.name.endswith('.csv'): #
+        df = pd.read_csv(file) #
+    elif hasattr(file, 'name') and file.name.endswith('.txt'): #
+        file_content_decoded = file.read().decode('utf-8', errors='ignore') #
+        urls = [line.strip() for line in file_content_decoded.splitlines() if line.strip()] #
+        df = pd.DataFrame({'URL': urls}) #
+    elif isinstance(file, io.StringIO): #  <--- 新增：针对手动输入场景
+        # 对于StringIO，我们假定它是txt格式的网址列表
+        file_content_decoded = file.read() # StringIO已经包含解码后的字符串
+        urls = [line.strip() for line in file_content_decoded.splitlines() if line.strip()]
         df = pd.DataFrame({'URL': urls})
     else:
-        raise ValueError("不支持的文件格式，请上传.csv或.txt文件")
+        raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件")
 
     # 尝试识别URL列
     if 'URL' not in df.columns:
