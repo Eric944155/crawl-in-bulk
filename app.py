@@ -217,7 +217,8 @@ with st.sidebar:
     st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); margin-bottom: 2rem;">', unsafe_allow_html=True)
     st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📤 邮件发送设置</h3>', unsafe_allow_html=True)
     
-    daily_limit = st.slider('每日发送上限', min_value=1, max_value=200, value=50, help="设置每日最大发送邮件数量，避免触发邮件服务商限制")
+    # 修改每日发送上限的默认值和最大值
+    daily_limit = st.slider('每日发送上限', min_value=1, max_value=100, value=30, help="设置每日最大发送邮件数量，避免触发邮件服务商限制。个人邮箱建议不超过50封。")
     interval_seconds = st.slider('发送间隔(秒)', min_value=10, max_value=300, value=60, help="两封邮件之间的时间间隔，建议不少于10秒")
     
     st.markdown('</div>', unsafe_allow_html=True)
@@ -420,7 +421,7 @@ with tab2:
                     try:
                         site_contacts = crawl_contacts(single_site)
                         contacts.append(site_contacts)
-                        time.sleep(0.5)  # 短暂延迟，避免请求过快
+                        time.sleep(0.5) # 短暂延迟，避免请求过快
                     except Exception as e:
                         st.error(f"爬取 {row['URL']} 时出错: {str(e)}")
                     
@@ -497,6 +498,18 @@ with tab2:
 with tab3:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">邮件群发</h2>', unsafe_allow_html=True)
     
+    # 添加每日发送数量警示提醒
+    st.markdown(
+        '<div style="background-color: #FFFBEB; color: #9A6C00; border: 1px solid #FAD14A; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">'
+        '<h5>⚠️ 邮件发送数量警示</h5>'
+        '<p>请注意，使用个人邮箱（如 Gmail）的 SMTP 服务进行大量群发邮件，<br>'
+        '**有很高风险被服务提供商暂停发送功能甚至封号。**'
+        '建议每日发送量控制在 **50 封以内**，并适当拉长发送间隔。<br>'
+        '如果您有大量发送需求，请考虑使用专业的邮件营销服务。</p>'
+        '</div>',
+        unsafe_allow_html=True
+    )
+
     if st.session_state.contacts is None or len(st.session_state.contacts) == 0:
         # 美化警告信息
         st.markdown(

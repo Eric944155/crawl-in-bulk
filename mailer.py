@@ -79,6 +79,15 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit
             # 检查是否达到每日上限
             if sent_count >= daily_limit:
                 print(f"已达到每日发送上限 {daily_limit} 封")
+                # 记录停止发送的日志
+                log_entry = pd.DataFrame([{
+                    'url': 'N/A', # 没有具体的URL，表示是停止发送的事件
+                    'recipient': 'N/A',
+                    'status': 'stopped',
+                    'error': f'Daily send limit ({daily_limit}) reached.',
+                    'timestamp': pd.Timestamp.now()
+                }])
+                send_log = pd.concat([send_log, log_entry], ignore_index=True)
                 break
             
             # 获取网站名称（从URL中提取）
@@ -88,6 +97,19 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit
             
             # 为每个邮箱发送邮件
             for email in contact.emails:
+                # 再次检查是否达到每日上限，以防在遍历内层循环时超出
+                if sent_count >= daily_limit:
+                    print(f"已达到每日发送上限 {daily_limit} 封")
+                    log_entry = pd.DataFrame([{
+                        'url': 'N/A',
+                        'recipient': 'N/A',
+                        'status': 'stopped',
+                        'error': f'Daily send limit ({daily_limit}) reached.',
+                        'timestamp': pd.Timestamp.now()
+                    }])
+                    send_log = pd.concat([send_log, log_entry], ignore_index=True)
+                    break # 跳出当前邮箱的循环
+                
                 # 创建邮件
                 msg = MIMEMultipart()
                 msg['Subject'] = f'关于与{website_name}的合作机会'
@@ -96,7 +118,9 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit
                 
                 # 替换模板中的变量
                 email_content = email_template.format(
-                    website_name=website_name
+                    website_name=website_name,
+                    # 可以添加更多变量，如 {contact_name}，但需要爬取时获取
+                    # {company_name} 也可以通过 website_name 来近似
                 )
                 
                 # 添加邮件内容
@@ -128,25 +152,32 @@ def send_bulk_email(contacts, smtp_config=None, email_template=None, daily_limit
                 # 增加计数器
                 sent_count += 1
                 
-                # 检查是否达到每日上限
-                if sent_count >= daily_limit:
-                    print(f"已达到每日发送上限 {daily_limit} 封")
-                    break
-                
                 # 间隔发送，避免被封
                 time.sleep(interval_seconds)
+            
+            # 如果内层循环因为达到上限而跳出，外层循环也应跳出
+            if sent_count >= daily_limit:
+                break
         
         # 关闭连接
         server.quit()
         
     except Exception as e:
-        print(f"SMTP连接错误: {e}")
+        print(f"SMTP连接或发送过程中发生错误: {e}")
+        log_entry = pd.DataFrame([{
+            'url': 'N/A',
+            'recipient': 'N/A',
+            'status': 'global_error',
+            'error': str(e),
+            'timestamp': pd.Timestamp.now()
+        }])
+        send_log = pd.concat([send_log, log_entry], ignore_index=True)
     
     # 打印发送统计
     print(f"\n发送统计:\n总计: {sent_count}\n成功: {success_count}\n失败: {error_count}")
     
     # 保存发送日志
-    send_log.to_csv('email_send_log.csv', index=False)
+    # send_log.to_csv('email_send_log.csv', index=False) # 暂时不自动保存，由前端控制导出
     
     return send_log
 
@@ -155,13 +186,24 @@ def configure_smtp(server, port, email, password, use_tls=True):
     """
     配置SMTP服务器信息
     """
-    return {
-        'server': server,
-        'port': port,
-        'email': email,
-        'password': password,
-        'use_tls': use_tls
-    }
+    # 尝试连接SMTP服务器以验证配置
+    try:
+        if use_tls:
+            with smtplib.SMTP(server, port) as s:
+                s.starttls()
+                s.login(email, password)
+        else:
+            with smtplib.SMTP_SSL(server, port) as s:
+                s.login(email, password)
+        return {
+            'server': server,
+            'port': port,
+            'email': email,
+            'password': password,
+            'use_tls': use_tls
+        }
+    except Exception as e:
+        raise Exception(f"SMTP配置验证失败: {str(e)}")
 
 # 自定义邮件模板的函数
 def create_email_template(subject_template, body_template):
