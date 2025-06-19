@@ -318,32 +318,23 @@ with tab1:
         # 添加按钮
         add_button = st.button('添加网址', use_container_width=True)
         
-        if add_button:
+if add_button:
             if manual_urls:
                 urls = [url.strip() for url in manual_urls.split('\n') if url.strip()]
                 if urls:
                     with st.spinner('正在处理网址...'):
-                        # 创建临时文件
-                        temp_file_path = 'temp_urls.txt'
-                        with open(temp_file_path, 'w') as f:
-                            for url in urls:
-                                f.write(f"{url}\n")
-                        
-                        # 处理临时文件
-                        with open(temp_file_path, 'r') as f:
-                            try:
-                                from io import StringIO
-                                file_content = StringIO(f.read())
-                                file_content.name = 'manual_input.txt'
-                                websites_df = process_website_file(file_content)
-                                st.session_state.websites = websites_df
-                                st.success(f'✅ 成功添加 {len(websites_df)} 个有效网址')
-                            except Exception as e:
-                                st.error(f'❌ 处理错误: {e}')
-                        
-                        # 删除临时文件
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
+                        try:
+                            from io import StringIO
+                            # 将手动输入的URLs字符串连接起来，模拟一个txt文件的内容
+                            file_content_string = "\n".join(urls)
+                            file_content = StringIO(file_content_string)
+                            
+                            # 直接将StringIO对象传递给process_website_file函数
+                            websites_df = process_website_file(file_content)
+                            st.session_state.websites = websites_df
+                            st.success(f'✅ 成功添加 {len(websites_df)} 个有效网址')
+                        except Exception as e:
+                            st.error(f'❌ 处理错误: {e}')
                 else:
                     st.warning('⚠️ 请输入至少一个有效网址')
             else:
