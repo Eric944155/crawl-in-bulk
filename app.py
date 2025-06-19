@@ -173,7 +173,6 @@ if 'current_date' not in st.session_state:
 if 'selected_social_platforms' not in st.session_state: # 新增：用于存储选中的社交媒体平台
     st.session_state.selected_social_platforms = []
 
-
 # 创建侧边栏
 with st.sidebar:
     st.markdown('<h2 style="color: #1E293B; font-weight: 600; margin-bottom: 1.5rem;">⚙️ 系统配置</h2>', unsafe_allow_html=True)
@@ -443,7 +442,6 @@ with tab2:
                     
                     # 显示统计信息
                     email_count = all_contacts['emails'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
-                    phone_count = all_contacts['phones'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
                     # Calculate total social links count
                     social_links_count = 0
                     for index, row in all_contacts.iterrows():
@@ -454,7 +452,6 @@ with tab2:
                     st.markdown('<div style="display: flex; justify-content: space-around; margin-top: 1rem;">', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(all_contacts)}</span><br><span style="color: #64748B;">网站</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{email_count}</span><br><span style="color: #64748B;">邮箱</span></div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{phone_count}</span><br><span style="color: #64748B;">电话</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{social_links_count}</span><br><span style="color: #64748B;">社媒链接</span></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                 else:
@@ -474,7 +471,6 @@ with tab2:
             st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">爬取内容包括：</p>', unsafe_allow_html=True)
             st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px;">', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接及部分HTML属性中的邮箱)</p>', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0.5rem;">📞 <strong>电话号码</strong> (通过严格正则匹配)</p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">🔗 <strong>联系页面</strong></p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong> (按平台分类)</p>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
@@ -490,7 +486,7 @@ with tab2:
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
             # --- 社交媒体筛选逻辑：按平台单列展示 ---
-
+            
             # 1. 获取所有可能的社交媒体平台
             all_possible_platforms = set()
             for _, row in st.session_state.contacts.iterrows():
@@ -529,7 +525,7 @@ with tab2:
 
             # 6. 仅保留所需列进行展示
             columns_to_show = [
-                col for col in ["url", "emails", "phones", "contact_pages", f"{selected_platform} 链接", "error"]
+                col for col in ["url", "emails", f"{selected_platform} 链接", "error"]
                 if col in display_df.columns
             ]
             display_df = display_df[columns_to_show]
@@ -538,8 +534,6 @@ with tab2:
             column_config = {
                 "url": st.column_config.LinkColumn("网站链接"),
                 "emails": "邮箱地址",
-                "phones": "电话号码",
-                "contact_pages": "联系页面",
                 f"{selected_platform} 链接": st.column_config.Column(
                     f"{selected_platform} 链接",
                     help=f"仅显示 {selected_platform} 的社交媒体链接",

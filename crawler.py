@@ -1,135 +1,77 @@
+import time
 import requests
 from bs4 import BeautifulSoup
-import re
+from utils import extract_contacts_from_soup, extract_contact_pages, extract_social_links, get_rendered_html
 import pandas as pd
-import time
-from urllib.parse import urlparse, urljoin
-from utils import extract_contacts_from_soup, extract_contact_pages, extract_social_links # 更新导入
 
-# 爬取联系方式的函数
-def crawl_contacts(websites):
-    contacts = []
+# 强化邮箱抓取，移除电话，结构极简
+
+def crawl_contacts(websites, use_selenium=True, max_depth=2):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Connection': 'keep-alive'
     }
-
+    contacts = []
     for url in websites['URL']:
         current_site_emails = []
-        current_site_phones = []
-        current_site_contact_pages = []
-        current_site_social_links_dict = {} # 更改为字典，用于分类存储社交媒体链接
-        site_error = None # 初始化错误信息为 None
-
+        current_site_social_links_dict = {}
+        site_error = None
         try:
-            # 获取基础URL（域名部分）
-            parsed_url = urlparse(url)
+            parsed_url = requests.utils.urlparse(url)
             base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
-            
-            # 请求网页，首先尝试进行SSL验证
+            # 1. 主页面抓取
             try:
-                response = requests.get(url, headers=headers, timeout=15) # 增加超时时间
-                response.raise_for_status() # 检查HTTP响应状态码，如果不是200会抛出异常
+                response = requests.get(url, headers=headers, timeout=15)
+                response.raise_for_status()
             except requests.exceptions.SSLError as ssl_err:
-                # 如果遇到SSL错误，则不进行SSL验证再次尝试（并打印警告）
-                print(f"SSL 错误发生于 {url}: {ssl_err}。不进行 SSL 验证重试。")
-                response = requests.get(url, headers=headers, timeout=15, verify=False) # verify=False 忽略SSL证书验证
-                response.raise_for_status() # 再次检查响应状态
-            except requests.exceptions.RequestException as req_err:
-                site_error = f"主页请求失败: {req_err}"
-                print(f"URL {url} 主页请求错误: {site_error}")
-                contacts.append({
-                    'url': url,
-                    'emails': [],
-                    'phones': [],
-                    'contact_pages': [],
-                    'social_links': {}, # 初始为空字典
-                    'error': site_error
-                })
-                time.sleep(2) # 延迟，避免请求过快
-                continue # 跳过当前URL的后续处理
-
+                response = requests.get(url, headers=headers, timeout=15, verify=False)
+                response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 从主页的HTML内容中提取邮箱和电话
-            emails_main, phones_main = extract_contacts_from_soup(soup, base_url) # 使用新的函数
+            emails_main = extract_contacts_from_soup(soup, base_url)
             current_site_emails.extend(emails_main)
-            current_site_phones.extend(phones_main)
-            
-            # 提取联系页面链接（包含联系我们、关于我们、FAQ等）
-            all_potential_contact_pages = extract_contact_pages(soup, base_url)
-            current_site_contact_pages.extend(all_potential_contact_pages) # 记录所有找到的潜在联系页面
-            
-            # 提取社交媒体链接并合并到字典中
+            # 社交媒体
             social_links_main_dict = extract_social_links(soup)
             for platform, links in social_links_main_dict.items():
-                if platform not in current_site_social_links_dict:
-                    current_site_social_links_dict[platform] = []
-                current_site_social_links_dict[platform].extend(links)
-            
-            # 递归爬取找到的潜在联系页面（最多爬取前5个，可以根据需求调整）
-            # 增加爬取深度，有助于发现深层页面的联系信息
-            for contact_page_url in all_potential_contact_pages[:5]: # 增加爬取深度
-                # 检查是否是相对路径，并转换为绝对路径
+                current_site_social_links_dict.setdefault(platform, []).extend(links)
+            # 2. 联系页面递归抓取
+            all_potential_contact_pages = extract_contact_pages(soup, base_url)
+            for contact_page_url in all_potential_contact_pages[:max_depth]:
                 if not contact_page_url.startswith(('http://', 'https://')):
-                    contact_page_url = urljoin(base_url, contact_page_url)
-
+                    contact_page_url = requests.compat.urljoin(base_url, contact_page_url)
                 try:
-                    # 尝试进行SSL验证
-                    try:
-                        contact_response = requests.get(contact_page_url, headers=headers, timeout=10)
-                        contact_response.raise_for_status()
-                    except requests.exceptions.SSLError as ssl_err_cp:
-                        print(f"联系页面 {contact_page_url} 发生 SSL 错误: {ssl_err_cp}。不进行 SSL 验证重试。")
-                        contact_response = requests.get(contact_page_url, headers=headers, timeout=10, verify=False)
-                        contact_response.raise_for_status()
-
+                    contact_response = requests.get(contact_page_url, headers=headers, timeout=10)
+                    contact_response.raise_for_status()
                     contact_soup = BeautifulSoup(contact_response.text, 'html.parser')
-                    
-                    # 提取联系页面中的邮箱和电话
-                    contact_emails, contact_phones = extract_contacts_from_soup(contact_soup, base_url) # 使用新的函数
+                    contact_emails = extract_contacts_from_soup(contact_soup, base_url)
                     current_site_emails.extend(contact_emails)
-                    current_site_phones.extend(contact_phones)
-                    
-                    # 提取联系页面中的社交媒体链接并合并到字典中
                     contact_social_links_dict = extract_social_links(contact_soup)
                     for platform, links in contact_social_links_dict.items():
-                        if platform not in current_site_social_links_dict:
-                            current_site_social_links_dict[platform] = []
-                        current_site_social_links_dict[platform].extend(links)
-                    
-                    # 短暂延迟，避免请求过快
+                        current_site_social_links_dict.setdefault(platform, []).extend(links)
                     time.sleep(0.5)
-                except requests.exceptions.RequestException as req_err_cp:
-                    print(f"请求联系页面 {contact_page_url} 时出错: {req_err_cp}")
-                except Exception as e_cp:
-                    print(f"爬取联系页面 {contact_page_url} 时发生通用错误: {e_cp}")
-            
-            # 对所有收集到的联系方式进行去重
+                except Exception:
+                    continue
+            # 3. selenium 动态渲染补充
+            if use_selenium and not current_site_emails:
+                try:
+                    html = get_rendered_html(url)
+                    soup = BeautifulSoup(html, 'html.parser')
+                    emails_selenium = extract_contacts_from_soup(soup, base_url)
+                    current_site_emails.extend(emails_selenium)
+                except Exception as e:
+                    site_error = f'动态抓取失败: {e}'
+            # 去重
             current_site_emails = list(set(current_site_emails))
-            current_site_phones = list(set(current_site_phones))
-            
-            # 对社交媒体链接进行去重
             for platform in current_site_social_links_dict:
                 current_site_social_links_dict[platform] = list(set(current_site_social_links_dict[platform]))
-            
         except Exception as e:
-            # 捕获其他所有通用错误
             site_error = str(e)
-            print(f'爬取 {url} 时发生通用错误: {site_error}')
-        
         contacts.append({
             'url': url,
             'emails': current_site_emails,
-            'phones': current_site_phones,
-            'contact_pages': list(set(current_site_contact_pages)), # 确保联系页面列表也去重
-            'social_links': current_site_social_links_dict, # 存储分类后的字典
-            'error': site_error # 记录主URL的错误信息
+            'social_links': current_site_social_links_dict,
+            'error': site_error if not current_site_emails else None
         })
-        
-        # 避免请求过快
         time.sleep(2)
-    
     return pd.DataFrame(contacts)

@@ -3,6 +3,9 @@ import validators
 import pandas as pd
 import io 
 from urllib.parse import urlparse, urljoin
+from bs4 import BeautifulSoup
+import selenium
+from selenium import webdriver
 
 # 社交媒体域名和对应的平台名称映射
 # 优化：更全面，更精准的匹配模式
@@ -44,6 +47,13 @@ COMPILED_SOCIAL_PATTERNS = {
     for platform, patterns in SOCIAL_MEDIA_PATTERNS.items()
 }
 
+# 邮箱反爬归一化函数
+def normalize_email_text(text):
+    import re
+    text = re.sub(r'\s*[\[\(\{]?at[\]\)\}]?\s*', '@', text, flags=re.I)
+    text = re.sub(r'\s*[\[\(\{]?dot[\]\)\}]?\s*', '.', text, flags=re.I)
+    text = text.replace(' at ', '@').replace(' dot ', '.')
+    return text
 
 # 验证URL格式
 def validate_url(url):
@@ -68,95 +78,23 @@ def clean_url(url):
         url = 'http://' + url # 默认使用 http，requests 会自动重定向到 https
     return url
 
-# 从BeautifulSoup对象中提取联系方式 (邮箱和电话)
+# 从BeautifulSoup对象中提取邮箱
 def extract_contacts_from_soup(soup, base_url):
     """
-    从BeautifulSoup对象中提取邮箱和电话
+    从BeautifulSoup对象中提取邮箱
     """
-    emails = []
-    phones = []
-
-    # 编译正则表达式，提高效率
-    # 邮箱正则表达式：匹配标准的邮箱格式，支持多种顶级域名 (2到63位)
-    email_regex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}')
-    
-    # 更严格的电话号码正则表达式：
-    # 目标：匹配更精确的电话号码，减少误报（排除日期、普通数字）
-    # 尝试匹配格式：
-    # 1. 国际格式：+国家码 (区号) 号码-号码 (如 +86 10 12345678, +1 (555) 123-4567)
-    # 2. 国内格式：区号-号码 (如 010-12345678, 021-98765432)
-    # 3. 手机号：1开头，11位数字 (中国大陆)
-    # 4. 其它常见号码模式，如不带区号的本地号码
-    # 主要改进：更长的数字序列，更明确的分隔符和前缀要求
-    phone_regex = re.compile(
-        r'''
-        (?:                                # 非捕获组，用于匹配可选的国家代码或国际拨号前缀
-            (?:\+)?\d{1,4}[-.\s]?           # 可选的 '+' 后面跟1-4位数字的国家代码，可选分隔符
-            |00\d{1,4}[-.\s]?              # 或者 '00' 后面跟1-4位数字，可选分隔符
-        )?
-        (?:                                # 非捕获组，用于匹配可选的区号
-            \(?\d{2,5}\)?[-.\s]?           # 可选的括号，2-5位数字的区号，可选分隔符
-        )?
-        \d{3,4}[-.\s]?\d{3,4}[-.\s]?\d{0,4} # 3-4位数字，可选分隔符，再3-4位数字，可选分隔符，最后0-4位（如分机号或更长号码）
-        |                                  # 或者
-        1[3-9]\d{9}                        # 严格匹配中国大陆11位手机号码 (13x, 14x, 15x, 16x, 17x, 18x, 19x)
-        ''',
-        re.VERBOSE # 允许使用注释和空白符，提高可读性
-    )
-
-    # 1. 从纯文本内容中提取邮箱和电话
-    # get_text() 会获取页面所有可见文本
-    text = soup.get_text()
-    
-    found_emails = email_regex.findall(text)
-    emails.extend(found_emails)
-
-    found_phones = phone_regex.findall(text)
-    for phone in found_phones:
-        cleaned_phone = re.sub(r'[^\d+]', '', phone) # 移除所有非数字字符，只保留数字和可选的开头的'+'
-        # 进一步筛选：排除明显过短或过长的数字串，以及纯粹的日期数字串
-        if 7 <= len(cleaned_phone) <= 15: # 一般电话号码长度在7-15位之间
-            # 简单排除常见日期格式的纯数字串，如20230101，但这仍不完美
-            if len(cleaned_phone) == 8 and cleaned_phone.startswith(('19', '20')): # 简单的年份日期排除
-                continue 
-            phones.append(cleaned_phone)
-
-    # 2. 从 'mailto:' 和 'tel:' 链接中提取邮箱和电话
-    for a_tag in soup.find_all('a', href=True):
-        href = a_tag['href']
+    emails = set()
+    all_text = normalize_email_text(soup.get_text(separator=' '))
+    # a标签
+    for a in soup.find_all('a', href=True):
+        href = normalize_email_text(a['href'])
         if href.startswith('mailto:'):
-            email = href[len('mailto:'):].split('?')[0].strip() # 移除邮件主题等参数
-            if email_regex.match(email): # 再次验证邮箱格式
-                emails.append(email)
-        elif href.startswith('tel:'):
-            phone = href[len('tel:'):].split('?')[0].strip() # 移除电话参数
-            cleaned_phone = re.sub(r'[^\d+]', '', phone)
-            if 7 <= len(cleaned_phone) <= 15:
-                phones.append(cleaned_phone)
-    
-    # 3. 尝试从更广泛的HTML元素属性中提取 (例如：data-email, content, placeholder, value, title等)
-    # 这种方式有助于捕获一些非标准但存在的联系信息
-    for tag in soup.find_all(True): # 查找所有HTML标签
-        for attr, value in tag.attrs.items():
-            if isinstance(value, str): # 确保属性值是字符串
-                # 检查邮箱
-                found_emails_in_attr = email_regex.findall(value)
-                emails.extend(found_emails_in_attr)
-                
-                # 检查电话
-                found_phones_in_attr = phone_regex.findall(value)
-                for phone in found_phones_in_attr:
-                    cleaned_phone = re.sub(r'[^\d+]', '', phone)
-                    if 7 <= len(cleaned_phone) <= 15:
-                        if len(cleaned_phone) == 8 and cleaned_phone.startswith(('19', '20')):
-                            continue
-                        phones.append(cleaned_phone)
-
-    # 去重并返回
-    emails = list(set(emails))
-    phones = list(set(phones))
-    
-    return emails, phones
+            emails.add(href.replace('mailto:', '').split('?')[0].strip())
+        else:
+            emails.update(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}', href))
+    # 文本中正则提取
+    emails.update(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}', all_text))
+    return list(emails)
 
 # 从HTML中提取联系页面链接
 def extract_contact_pages(soup, base_url):
@@ -239,6 +177,19 @@ def extract_social_links(soup):
         social_links_by_platform[platform] = list(set(social_links_by_platform[platform]))
     
     return social_links_by_platform
+
+# selenium 动态渲染支持
+def get_rendered_html(url):
+    from selenium import webdriver
+    options = webdriver.ChromeOptions()
+    options.add_argument('--headless')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--no-sandbox')
+    driver = webdriver.Chrome(options=options)
+    driver.get(url)
+    html = driver.page_source
+    driver.quit()
+    return html
 
 # 处理上传的网站列表文件或手动输入
 def process_website_file(file):
