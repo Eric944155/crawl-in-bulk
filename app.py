@@ -485,95 +485,36 @@ with tab2:
             st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
-            # --- 社交媒体筛选逻辑：按平台单列展示 ---
-            
-            # 1. 获取所有可能的社交媒体平台
-            all_possible_platforms = set()
-            for _, row in st.session_state.contacts.iterrows():
-                if isinstance(row['social_links'], dict):
-                    all_possible_platforms.update(row['social_links'].keys())
-            sorted_platforms = sorted(list(all_possible_platforms))
+            # ========== 动态社媒下拉框功能集成 ========== 
+            # 替换原有静态facebook链接列与导出逻辑
 
-            # 2. 创建单选下拉框
-            selected_platform = st.selectbox(
-                '选择要展示的社交媒体平台',
-                options=sorted_platforms,
-                index=0,
-                help='选择一个平台，仅展示该平台的社交媒体链接'
-            )
-
-            # 3. 提取指定平台的链接为单独列
-
-            def extract_platform_column(social_dict, platform):
-                if isinstance(social_dict, dict) and platform in social_dict:
-                    links = social_dict[platform]
-                    if links:
-                        return "<br>".join([
-                            f'<a href="{link}" target="_blank">{link.split("//")[-1].split("/")[0]}</a>' for link in links
-                        ])
-                return "无"
-
-            # 4. 创建展示用 DataFrame，只展示选中的平台列
-            display_df = st.session_state.contacts.copy()
-            display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(
-                lambda x: extract_platform_column(x, selected_platform)
-            )
-
-            # 5. 删除原始社交媒体列
-            if 'social_links' in display_df.columns:
-                display_df = display_df.drop(columns=['social_links'])
-
-            # 6. 仅保留所需列进行展示
-            columns_to_show = [
-                col for col in ["url", "emails", f"{selected_platform} 链接", "error"]
-                if col in display_df.columns
-            ]
-            display_df = display_df[columns_to_show]
-
-            # 7. 配置列信息
-            column_config = {
-                "url": st.column_config.LinkColumn("网站链接"),
-                "emails": "邮箱地址",
-                f"{selected_platform} 链接": st.column_config.Column(
-                    f"{selected_platform} 链接",
-                    help=f"仅显示 {selected_platform} 的社交媒体链接",
-                    width="large"
-                ),
-                "error": "错误信息"
-            }
-
-            # 8. 渲染展示 DataFrame
-            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # 导出功能
-            export_col1, export_col2 = st.columns([1, 3])
-            with export_col1:
-                # 使用SessionState来控制下载链接的显示，防止rerun后消失
-                if 'download_link_displayed' not in st.session_state:
-                    st.session_state.download_link_displayed = False
-
-                if st.button('导出数据', key='export_data', use_container_width=True):
-                    # For export, transform social_links to JSON string for better CSV handling
-                    export_df = st.session_state.contacts.copy()
-                    # 确保 social_links 在导出时是字符串表示，方便CSV处理
-                    export_df['social_links'] = export_df['social_links'].apply(lambda x: str(x) if isinstance(x, dict) else x) 
-                    
-                    # Generate filename with timestamp
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    export_filename = f'contacts_{timestamp}.csv'
-                    
-                    csv = export_df.to_csv(index=False).encode('utf-8')
-                    b64 = base64.b64encode(csv).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="{export_filename}" class="download-link" style="color: var(--primary-color); text-decoration: none;">点击下载 {export_filename}</a>'
-                    
-                    st.session_state.export_link = href
-                    st.session_state.download_link_displayed = True
-                    st.rerun() # Rerun to display the link immediately
-            with export_col2:
-                if st.session_state.download_link_displayed and 'export_link' in st.session_state:
-                    st.markdown(f'✅ 数据已导出: {st.session_state.export_link}', unsafe_allow_html=True)
+            # 假定 contacts_df 为已处理的 DataFrame，包含 social_links 字段
+            if 'contacts' in st.session_state and st.session_state.contacts is not None:
+                contacts_df = st.session_state.contacts.copy()
+                # 统计所有出现过的社交平台
+                all_platforms = set()
+                for links in contacts_df['social_links']:
+                    if isinstance(links, dict):
+                        all_platforms.update(links.keys())
+                all_platforms = sorted(list(all_platforms))
+                if not all_platforms:
+                    all_platforms = ['facebook']  # 兜底，防止无社媒时报错
+                # 下拉选择社交平台
+                selected_platform = st.selectbox("选择社交平台", all_platforms, index=0)
+                def get_links_str(social_links, platform):
+                    if isinstance(social_links, dict) and platform in social_links:
+                        return ', '.join(social_links[platform])
+                    return '无'
+                display_df = contacts_df.copy()
+                display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
+                # 只展示核心列
+                columns_to_show = ["url", "emails", f"{selected_platform} 链接", "error"]
+                display_df = display_df[columns_to_show]
+                # 展示表格
+                st.dataframe(display_df, use_container_width=True)
+                # 导出当前平台数据
+                csv = display_df.to_csv(index=False).encode('utf-8')
+                st.download_button('导出数据', csv, file_name='contacts_export.csv', mime='text/csv')
             
             st.markdown('</div>', unsafe_allow_html=True)
 
