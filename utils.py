@@ -247,9 +247,28 @@ def clean_url(url):
     return url
 
 def extract_contacts_from_soup(soup, base_url):
+    """增强版联系信息提取函数，支持更多提取策略和反爬处理"""
     emails = set()
     
-    # 1. 首先从mailto链接中提取邮箱（最可靠的来源）
+    # 1. 处理隐藏的邮箱元素
+    def process_hidden_elements(element):
+        # 检查style属性中的display:none和visibility:hidden
+        style = element.get('style', '')
+        if 'display:none' in style.replace(' ', '') or 'visibility:hidden' in style.replace(' ', ''):
+            return True
+        return False
+    
+    # 2. 提取文本中的邮箱，包括反爬处理
+    def extract_from_text(text):
+        # 预处理文本
+        text = normalize_email_text(text)
+        # 提取并验证邮箱
+        found_emails = extract_valid_emails(text)
+        return found_emails
+    
+    # 3. 从各种来源提取邮箱
+    
+    # 3.1 从mailto链接提取（最可靠的来源）
     for a in soup.find_all('a', href=True):
         href = normalize_email_text(a['href'])
         if href.startswith('mailto:'):
@@ -257,32 +276,65 @@ def extract_contacts_from_soup(soup, base_url):
             if '@' in clean_email:
                 emails.update(extract_valid_emails(clean_email))
     
-    # 2. 从页脚区域排除版权信息
-    footer_tags = soup.find_all(['footer', 'div', 'section'], class_=lambda c: c and any(x in str(c).lower() for x in ['footer', 'copyright', 'bottom']))
-    for footer in footer_tags:
-        footer.decompose()  # 从DOM中移除页脚元素
+    # 3.2 从图片alt和title属性提取
+    for img in soup.find_all('img', alt=True):
+        if '@' in img.get('alt', ''):
+            emails.update(extract_from_text(img['alt']))
+        if '@' in img.get('title', ''):
+            emails.update(extract_from_text(img['title']))
     
-    # 3. 如果mailto没有找到邮箱，在联系相关区域查找
-    if not emails:
-        # 首先尝试找到联系相关区域
-        contact_sections = soup.find_all(['div', 'section', 'article'], id=lambda i: i and any(x in str(i).lower() for x in ['contact', 'about']))
-        contact_sections += soup.find_all(['div', 'section', 'article'], class_=lambda c: c and any(x in str(c).lower() for x in ['contact', 'about']))
-        
-        # 如果找到联系区域，优先在这些区域查找
-        search_areas = contact_sections if contact_sections else soup
-        
-        # 在确定的区域中查找可能包含邮箱的元素
-        allowed_tags = ['p', 'span', 'div', 'li', 'td', 'address', 'section', 'article', 'main', 'a']
-        for area in (search_areas if isinstance(search_areas, list) else [search_areas]):
-            for tag in area.find_all(allowed_tags):
-                txt = tag.get_text(separator=' ', strip=True)
-                # 只处理可能包含邮箱的文本
-                if '@' in txt and any(k in txt.lower() for k in EMAIL_KEYWORDS):
-                    # 排除明显的版权信息
-                    if not any(x in txt.lower() for x in ['copyright', 'all rights reserved', '©']):
-                        emails.update(extract_valid_emails(txt))
+    # 3.3 从data属性提取
+    for elem in soup.find_all(lambda tag: any(attr for attr in tag.attrs if 'data-' in attr)):
+        for attr, value in elem.attrs.items():
+            if 'data-' in attr and isinstance(value, str) and '@' in value:
+                emails.update(extract_from_text(value))
     
-    # 4. 去重、验证邮箱
+    # 3.4 从注释中提取
+    from bs4.Comment import Comment
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
+        if '@' in comment:
+            emails.update(extract_from_text(comment))
+    
+    # 3.5 从联系相关区域提取
+    contact_keywords = ['contact', 'about', 'support', 'help', 'team', '联系', '关于', '支持', '团队']
+    
+    # 通过ID查找
+    contact_sections = soup.find_all(lambda tag: tag.get('id', '').lower() and 
+                                   any(keyword in tag.get('id', '').lower() for keyword in contact_keywords))
+    
+    # 通过class查找
+    contact_sections += soup.find_all(lambda tag: tag.get('class', []) and 
+                                    any(any(keyword in cls.lower() for keyword in contact_keywords) 
+                                        for cls in tag.get('class', [])))
+    
+    # 通过role属性查找
+    contact_sections += soup.find_all(['div', 'section'], role=lambda r: r and 'contentinfo' in r.lower())
+    
+    # 如果找到特定区域，优先在这些区域查找
+    search_areas = contact_sections if contact_sections else [soup]
+    
+    # 在所有可能的区域中查找邮箱
+    for area in search_areas:
+        # 检查所有可能包含文本的元素
+        for elem in area.find_all(['p', 'span', 'div', 'li', 'td', 'address', 'a', 'label', 'strong', 'em']):
+            # 检查元素是否隐藏
+            if process_hidden_elements(elem):
+                continue
+                
+            # 获取元素文本
+            text = elem.get_text(separator=' ', strip=True)
+            
+            # 检查是否包含邮箱相关特征
+            if '@' in text or any(k in text.lower() for k in EMAIL_KEYWORDS):
+                # 排除版权信息
+                if not any(x in text.lower() for x in ['copyright', 'all rights reserved', '©']):
+                    emails.update(extract_from_text(text))
+            
+            # 检查title属性
+            if elem.get('title') and '@' in elem['title']:
+                emails.update(extract_from_text(elem['title']))
+    
+    # 4. 验证所有提取到的邮箱
     valid_emails = set()
     for email in emails:
         if is_valid_email(email):
@@ -370,17 +422,97 @@ def extract_social_links(soup):
     return social_links_by_platform
 
 # selenium 动态渲染支持
-def get_rendered_html(url):
+def get_rendered_html(url, wait_time=5):
+    """增强版动态渲染函数，支持更多配置和更好的稳定性"""
     from selenium import webdriver
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.by import By
+    from selenium.common.exceptions import TimeoutException, WebDriverException
+    import time
+    
     options = webdriver.ChromeOptions()
-    options.add_argument('--headless')
+    # 基本配置
+    options.add_argument('--headless=new')  # 新版无头模式
     options.add_argument('--disable-gpu')
     options.add_argument('--no-sandbox')
-    driver = webdriver.Chrome(options=options)
-    driver.get(url)
-    html = driver.page_source
-    driver.quit()
-    return html
+    options.add_argument('--disable-dev-shm-usage')
+    
+    # 性能优化
+    options.add_argument('--disable-extensions')
+    options.add_argument('--disable-setuid-sandbox')
+    options.add_argument('--disable-infobars')
+    options.add_argument('--disable-logging')
+    options.add_argument('--disable-notifications')
+    options.add_argument('--disable-popup-blocking')
+    
+    # 内存优化
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-software-rasterizer')
+    options.add_argument('--disable-default-apps')
+    
+    # 反爬虫配置
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option('excludeSwitches', ['enable-automation'])
+    options.add_experimental_option('useAutomationExtension', False)
+    
+    # 模拟真实浏览器
+    options.add_argument('--window-size=1920,1080')
+    options.add_argument('--start-maximized')
+    options.add_argument(f'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{webdriver.__version__} Safari/537.36')
+    
+    try:
+        driver = webdriver.Chrome(options=options)
+        # 修改 navigator.webdriver 标志
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # 设置页面加载超时
+        driver.set_page_load_timeout(wait_time * 2)
+        driver.get(url)
+        
+        # 等待页面加载完成
+        try:
+            WebDriverWait(driver, wait_time).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            # 执行滚动以触发懒加载
+            driver.execute_script("""
+                window.scrollTo(0, 0);
+                window.scrollTo(0, document.body.scrollHeight/2);
+                window.scrollTo(0, document.body.scrollHeight);
+            """)
+            
+            # 等待动态内容加载
+            time.sleep(wait_time / 2)
+            
+            # 尝试点击可能的展开按钮或"显示更多"链接
+            try:
+                buttons = driver.find_elements(By.XPATH, "//*[contains(text(), 'more') or contains(text(), 'Show') or contains(text(), 'expand') or contains(text(), '更多') or contains(text(), '展开')]") 
+                for button in buttons[:3]:  # 限制尝试次数
+                    try:
+                        button.click()
+                        time.sleep(1)
+                    except:
+                        continue
+            except:
+                pass
+            
+        except TimeoutException:
+            pass  # 即使超时也继续获取页面源码
+        
+        # 获取渲染后的HTML
+        html = driver.page_source
+        return html
+    
+    except Exception as e:
+        raise Exception(f"Selenium error: {str(e)}")
+    
+    finally:
+        try:
+            driver.quit()
+        except:
+            pass
 
 # 处理上传的网站列表文件或手动输入
 def process_website_file(file):

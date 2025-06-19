@@ -111,17 +111,23 @@ def robust_get(url, headers, timeout=15):
     return None, f'Failed after {MAX_RETRIES} retries'
 
 def crawl_contacts(websites, use_selenium=True, max_depth=2):
+    # 增强的请求头和配置
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0'
+        'Cache-Control': 'max-age=0',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Referer': 'https://www.google.com/'
     }
     contacts = []
     for url in websites['URL']:
@@ -192,27 +198,37 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
             except Exception as e:
                 error_msgs.append(f'Error processing {contact_page_url}: {str(e)}')
                 continue
-        # 4. 若未找到邮箱或邮箱数量少于2个，尝试 selenium 动态渲染
-        if use_selenium and len(current_site_emails) < 2:
+        # 4. 使用增强的 selenium 动态渲染策略
+        if use_selenium:
             try:
                 # 首先尝试主页
-                html = get_rendered_html(base_url)
+                html = get_rendered_html(base_url, wait_time=8)  # 增加等待时间
                 soup = BeautifulSoup(html, 'html.parser')
                 emails_selenium = extract_contacts_from_soup(soup, base_url)
                 current_site_emails.update(emails_selenium)
                 
                 # 如果主页没有找到足够的邮箱，尝试联系页面
                 if len(current_site_emails) < 2 and contact_pages:
-                    # 选择最可能的联系页面
-                    best_contact_page = contact_pages[0] if contact_pages else None
-                    if best_contact_page:
+                    # 按关键词相关性排序联系页面
+                    contact_pages.sort(key=lambda url: sum(1 for k in CONTACT_PAGE_KEYWORDS if k in url.lower()), reverse=True)
+                    
+                    # 尝试前两个最可能的联系页面
+                    for contact_page in contact_pages[:2]:
                         try:
-                            contact_html = get_rendered_html(best_contact_page)
+                            contact_html = get_rendered_html(contact_page, wait_time=8)
                             contact_soup = BeautifulSoup(contact_html, 'html.parser')
+                            
+                            # 提取联系页面的邮箱
                             contact_emails = extract_contacts_from_soup(contact_soup, base_url)
                             current_site_emails.update(contact_emails)
+                            
+                            # 如果找到了足够的邮箱，就停止搜索
+                            if len(current_site_emails) >= 2:
+                                break
+                                
                         except Exception as e:
-                            error_msgs.append(f'selenium contact page: {e}')
+                            error_msgs.append(f'selenium contact page {contact_page}: {e}')
+                            continue
             except Exception as e:
                 error_msgs.append(f'selenium main page: {e}')
         
