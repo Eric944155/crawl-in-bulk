@@ -36,11 +36,26 @@ def extract_contacts_from_text(text):
     emails = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w\.-]+', text)
     
     # 提取电话号码
-    # *** 关键修改 1: 修正正则表达式，对特殊字符进行转义 ***
-    # 匹配可选的+，然后是数字，接着是7个或更多个数字、空白字符、连字符、左括号或右括号，最后以数字结尾。
-    phones = re.findall(r'\+?\d[\d\s\-\(\)]{7,}\d', text) #
+    # 改进的正则表达式，尝试匹配常见的电话号码格式，包括可选的国家代码、区号以及各种分隔符
+    # 匹配格式如：
+    # +XX XXX XXX XXXX
+    # (XXX) XXX-XXXX
+    # XXX-XXX-XXXX
+    # XXX XXX XXXX
+    # 允许空格、连字符、括号、点、中间点作为分隔符，至少7位数字（不包括国家代码和区号）
+    phones = re.findall(r'(?:\+\d{1,3}[-.●\s]?)?\(?\d{2,4}\)?[-.●\s]?\d{3,4}[-.●\s]?\d{3,4}(?:[-.●\s]?\d{1,4})?', text) #
     
-    return list(set(emails)), list(set(phones))
+    cleaned_phones = [] #
+    for phone in phones: #
+        # 移除所有非数字字符，只保留数字和可选的开头的'+'
+        cleaned_phone = re.sub(r'[^\d+]', '', phone) #
+        # 检查是否以'+'开头且后面是数字，或者直接是纯数字
+        if cleaned_phone.startswith('+') and len(cleaned_phone) > 7: # 至少国家代码+7位数字
+            cleaned_phones.append(cleaned_phone) #
+        elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7: # 至少7位纯数字
+            cleaned_phones.append(cleaned_phone) #
+
+    return list(set(emails)), list(set(cleaned_phones)) # 返回去重后的清理过的电话号码
 
 # 从HTML中提取联系页面链接
 def extract_contact_pages(soup, base_url):
@@ -89,7 +104,7 @@ def process_website_file(file):
     # 无需再次导入io，因为它已经在文件顶部导入
     df = None # 初始化df，以防没有任何条件匹配
     
-    # *** 关键修改 2: 增加对 StringIO 对象的处理，并使用 hasattr 检查 'name' 属性 ***
+    # 增加对 StringIO 对象的处理，并使用 hasattr 检查 'name' 属性
     if hasattr(file, 'name') and file.name.endswith('.csv'):
         df = pd.read_csv(file)
     elif hasattr(file, 'name') and file.name.endswith('.txt'):
