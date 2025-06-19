@@ -4,25 +4,56 @@ import pandas as pd
 import io 
 from urllib.parse import urlparse, urljoin
 
-# 社交媒体域名列表
-# 进一步细化，包含更具体的社交媒体平台链接模式和常见路径
-SOCIAL_DOMAINS = [
-    'facebook.com/', 'twitter.com/', 'x.com/', 'instagram.com/', 
-    'linkedin.com/company/', 'linkedin.com/in/', 'linkedin.com/groups/',
-    'youtube.com/', # 更通用的YouTube链接，具体频道可在后面判断
-    'pinterest.com/', 'tiktok.com/@', 'weibo.com/', 
-    'vk.com/', 'reddit.com/user/', 'snapchat.com/add/', 
-    'whatsapp.com/', 'telegram.org/', 'medium.com/@', 'github.com/', 
-    'flickr.com/', 'tumblr.com/', 'behance.net/', 'dribbble.com/'
-]
+# 社交媒体域名和对应的平台名称映射
+# 优化：更全面，更精准的匹配模式
+SOCIAL_MEDIA_PATTERNS = {
+    "facebook": [r"facebook\.com/(?!sharer\.php)[\w\d\.-]+/?$", r"fb\.com/"], # 排除分享链接
+    "twitter": [r"(?:twitter|x)\.com/[\w\d_]+/?$", r"t\.co/"],
+    "linkedin": [r"linkedin\.com/(?:company|in|groups)/[\w\d\.-]+/?$"],
+    "youtube": [r"youtube\.com/(?:channel/|user/|c/)?[\w\d\-_]+/?$", r"youtu\.be/"],
+    "instagram": [r"instagram\.com/[\w\d\.-]+/?$"],
+    "pinterest": [r"pinterest\.com/[\w\d\.-]+/?$"],
+    "tiktok": [r"tiktok\.com/@[\w\d\.-]+/?$"],
+    "weibo": [r"weibo\.com/(?:u/)?[\w\d]+/?$"],
+    "vk": [r"vk\.com/(?!share\.php)[\w\d\.-]+/?$"],
+    "reddit": [r"reddit\.com/user/[\w\d\.-]+/?$"],
+    "snapchat": [r"snapchat\.com/add/[\w\d\.-]+/?$"],
+    "whatsapp": [r"wa\.me/\d+", r"api\.whatsapp\.com/send"], # WhatsApp Direct links
+    "telegram": [r"t\.me/[\w\d_]+", r"telegram\.me/[\w\d_]+"], # Telegram channels/users
+    "medium": [r"medium\.com/@[\w\d\.-]+/?$"],
+    "github": [r"github\.com/[\w\d\.-]+/?$"],
+    "flickr": [r"flickr\.com/(?:photos|people)/[\w\d\.-]+/?$"],
+    "tumblr": [r"[\w\d\.-]+\.tumblr\.com/?$"],
+    "behance": [r"behance\.net/[\w\d\.-]+/?$"],
+    "dribbble": [r"dribbble\.com/[\w\d\.-]+/?$"],
+    "discord": [r"discord\.(?:gg|com/invite)/[\w\d]+"], # Discord invite links
+    "twitch": [r"twitch\.tv/[\w\d_]+/?$"],
+    "bilibili": [r"bilibili\.com/(?:@)?\d+/?$"], # Bilibili user/space
+    "douyin": [r"douyin\.com/user/[\w\d_]+/?$"], # Douyin user profile
+    "kuaishou": [r"kuaishou\.com/user/[\w\d_]+/?$"], # Kuaishou user profile
+    "zhihu": [r"zhihu\.com/people/[\w\d-]+/?$"], # Zhihu user profile
+    "xiaohongshu": [r"xiaohongshu\.com/user/profile/[\w\d]+/?$"], # Xiaohongshu user profile
+    "vimeo": [r"vimeo\.com/(?:channels/)?[\w\d]+/?$"],
+    "soundcloud": [r"soundcloud\.com/[\w\d\.-]+/?$"],
+    "spotify": [r"open\.spotify\.com/(?:artist|user|show)/[\w\d]+/?$"]
+}
+
+# 编译所有正则表达式，提高效率
+COMPILED_SOCIAL_PATTERNS = {
+    platform: [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    for platform, patterns in SOCIAL_MEDIA_PATTERNS.items()
+}
+
 
 # 验证URL格式
 def validate_url(url):
     """
     验证URL格式是否正确
     """
-    # 增加对URL验证的健壮性，允许更多的有效URL格式
     try:
+        # validators.url 已经足够健壮，但额外检查是否为空字符串
+        if not url:
+            return False
         return validators.url(url)
     except validators.ValidationError:
         return False
@@ -49,13 +80,28 @@ def extract_contacts_from_soup(soup, base_url):
     # 邮箱正则表达式：匹配标准的邮箱格式，支持多种顶级域名 (2到63位)
     email_regex = re.compile(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,63}')
     
-    # 电话号码正则表达式：匹配更广泛的电话号码格式，包括国家代码、区号、各种分隔符
-    # 尽可能捕获常见的号码，但电话号码格式多样，难以完美覆盖所有情况
+    # 更严格的电话号码正则表达式：
+    # 目标：匹配更精确的电话号码，减少误报（排除日期、普通数字）
+    # 尝试匹配格式：
+    # 1. 国际格式：+国家码 (区号) 号码-号码 (如 +86 10 12345678, +1 (555) 123-4567)
+    # 2. 国内格式：区号-号码 (如 010-12345678, 021-98765432)
+    # 3. 手机号：1开头，11位数字 (中国大陆)
+    # 4. 其它常见号码模式，如不带区号的本地号码
+    # 主要改进：更长的数字序列，更明确的分隔符和前缀要求
     phone_regex = re.compile(
-        r'(?:(?:\+|00)\d{1,4}[-.\s]?)?' # 可选的国家代码，如 +86 或 0086
-        r'(?:\(?\d{2,5}\)?[-.\s]?)?'    # 可选的区号，如 (010)
-        r'\d{3,4}[-.\s]?\d{3,4}'        # 中间和最后一部分数字
-        r'(?:[-.\s]?\d{1,4})?'         # 可选的扩展位或更长数字
+        r'''
+        (?:                                # 非捕获组，用于匹配可选的国家代码或国际拨号前缀
+            (?:\+)?\d{1,4}[-.\s]?           # 可选的 '+' 后面跟1-4位数字的国家代码，可选分隔符
+            |00\d{1,4}[-.\s]?              # 或者 '00' 后面跟1-4位数字，可选分隔符
+        )?
+        (?:                                # 非捕获组，用于匹配可选的区号
+            \(?\d{2,5}\)?[-.\s]?           # 可选的括号，2-5位数字的区号，可选分隔符
+        )?
+        \d{3,4}[-.\s]?\d{3,4}[-.\s]?\d{0,4} # 3-4位数字，可选分隔符，再3-4位数字，可选分隔符，最后0-4位（如分机号或更长号码）
+        |                                  # 或者
+        1[3-9]\d{9}                        # 严格匹配中国大陆11位手机号码 (13x, 14x, 15x, 16x, 17x, 18x, 19x)
+        ''',
+        re.VERBOSE # 允许使用注释和空白符，提高可读性
     )
 
     # 1. 从纯文本内容中提取邮箱和电话
@@ -68,9 +114,11 @@ def extract_contacts_from_soup(soup, base_url):
     found_phones = phone_regex.findall(text)
     for phone in found_phones:
         cleaned_phone = re.sub(r'[^\d+]', '', phone) # 移除所有非数字字符，只保留数字和可选的开头的'+'
-        if cleaned_phone.startswith('+') and len(cleaned_phone) > 7: # 至少国家代码+7位数字
-            phones.append(cleaned_phone)
-        elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7: # 至少7位纯数字
+        # 进一步筛选：排除明显过短或过长的数字串，以及纯粹的日期数字串
+        if 7 <= len(cleaned_phone) <= 15: # 一般电话号码长度在7-15位之间
+            # 简单排除常见日期格式的纯数字串，如20230101，但这仍不完美
+            if len(cleaned_phone) == 8 and cleaned_phone.startswith(('19', '20')): # 简单的年份日期排除
+                continue 
             phones.append(cleaned_phone)
 
     # 2. 从 'mailto:' 和 'tel:' 链接中提取邮箱和电话
@@ -78,15 +126,15 @@ def extract_contacts_from_soup(soup, base_url):
         href = a_tag['href']
         if href.startswith('mailto:'):
             email = href[len('mailto:'):].split('?')[0].strip() # 移除邮件主题等参数
-            if '@' in email and '.' in email and email_regex.match(email): # 再次验证邮箱格式
+            if email_regex.match(email): # 再次验证邮箱格式
                 emails.append(email)
         elif href.startswith('tel:'):
             phone = href[len('tel:'):].split('?')[0].strip() # 移除电话参数
             cleaned_phone = re.sub(r'[^\d+]', '', phone)
-            if len(cleaned_phone) >= 7:
+            if 7 <= len(cleaned_phone) <= 15:
                 phones.append(cleaned_phone)
     
-    # 3. 尝试从更广泛的HTML元素属性中提取 (例如：data-email, content, placeholder等)
+    # 3. 尝试从更广泛的HTML元素属性中提取 (例如：data-email, content, placeholder, value, title等)
     # 这种方式有助于捕获一些非标准但存在的联系信息
     for tag in soup.find_all(True): # 查找所有HTML标签
         for attr, value in tag.attrs.items():
@@ -99,9 +147,9 @@ def extract_contacts_from_soup(soup, base_url):
                 found_phones_in_attr = phone_regex.findall(value)
                 for phone in found_phones_in_attr:
                     cleaned_phone = re.sub(r'[^\d+]', '', phone)
-                    if cleaned_phone.startswith('+') and len(cleaned_phone) > 7:
-                        phones.append(cleaned_phone)
-                    elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7:
+                    if 7 <= len(cleaned_phone) <= 15:
+                        if len(cleaned_phone) == 8 and cleaned_phone.startswith(('19', '20')):
+                            continue
                         phones.append(cleaned_phone)
 
     # 去重并返回
@@ -115,9 +163,9 @@ def extract_contact_pages(soup, base_url):
     """
     从HTML中提取"联系我们"、"关于我们"、"常见问题"等页面链接
     """
-    contact_keywords = ['contact', 'contact-us', 'contact_us', 'contactus', '联系', '联系我们', '与我们联系', '联络']
-    about_keywords = ['about', 'about-us', 'about_us', 'aboutus', '关于', '关于我们']
-    faq_keywords = ['faq', 'questions', '常见问题', 'help', '帮助']
+    contact_keywords = ['contact', 'contact-us', 'contact_us', 'contactus', '联系', '联系我们', '与我们联系', '联络', '支持', 'support', 'help']
+    about_keywords = ['about', 'about-us', 'about_us', 'aboutus', '关于', '关于我们', '公司', '企业', 'profile']
+    faq_keywords = ['faq', 'questions', '常见问题', 'q&a']
     
     potential_pages = []
     
@@ -154,27 +202,43 @@ def extract_contact_pages(soup, base_url):
     # 去重并返回
     return list(set(potential_pages))
 
-# 从HTML中提取社交媒体链接
+# 从HTML中提取社交媒体链接并分类
 def extract_social_links(soup):
     """
-    从HTML中提取社交媒体链接
+    从HTML中提取社交媒体链接，并按平台分类。
+    返回一个字典，键为平台名称，值为该平台链接的列表。
     """
-    social_links = []
+    social_links_by_platform = {}
     
-    # 编译社交媒体域名列表，提高效率
-    compiled_social_domains = [re.compile(re.escape(domain.rstrip('/'))) for domain in SOCIAL_DOMAINS]
-
     for a in soup.find_all('a', href=True):
         href = a['href'].strip()
-        # 增加对链接的初步清理，移除末尾斜杠和参数，便于匹配
+        
+        # 排除空链接、内部锚点、邮件或电话链接
+        if not href or href == '#' or href.startswith(('javascript:', 'mailto:', 'tel:')):
+            continue
+        
+        # 统一处理链接，移除查询参数和片段标识符，以便匹配
         clean_href = href.split('?')[0].split('#')[0].rstrip('/')
         
-        for domain_pattern in compiled_social_domains:
-            if domain_pattern.search(clean_href.lower()):
-                social_links.append(href) # 保留原始链接以便完整性
-                break # 找到一个匹配即可
+        found_platform = None
+        for platform, patterns in COMPILED_SOCIAL_PATTERNS.items():
+            for pattern in patterns:
+                if pattern.search(clean_href):
+                    found_platform = platform
+                    break
+            if found_platform:
+                break
+        
+        if found_platform:
+            if found_platform not in social_links_by_platform:
+                social_links_by_platform[found_platform] = []
+            social_links_by_platform[found_platform].append(href) # 存储原始完整链接
     
-    return list(set(social_links))
+    # 对每个平台的链接进行去重
+    for platform in social_links_by_platform:
+        social_links_by_platform[platform] = list(set(social_links_by_platform[platform]))
+    
+    return social_links_by_platform
 
 # 处理上传的网站列表文件或手动输入
 def process_website_file(file):

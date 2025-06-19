@@ -20,7 +20,7 @@ def crawl_contacts(websites):
         current_site_emails = []
         current_site_phones = []
         current_site_contact_pages = []
-        current_site_social_links = []
+        current_site_social_links_dict = {} # 更改为字典，用于分类存储社交媒体链接
         site_error = None # 初始化错误信息为 None
 
         try:
@@ -45,7 +45,7 @@ def crawl_contacts(websites):
                     'emails': [],
                     'phones': [],
                     'contact_pages': [],
-                    'social_links': [],
+                    'social_links': {}, # 初始为空字典
                     'error': site_error
                 })
                 time.sleep(2) # 延迟，避免请求过快
@@ -62,9 +62,12 @@ def crawl_contacts(websites):
             all_potential_contact_pages = extract_contact_pages(soup, base_url)
             current_site_contact_pages.extend(all_potential_contact_pages) # 记录所有找到的潜在联系页面
             
-            # 提取社交媒体链接
-            social_links_main = extract_social_links(soup)
-            current_site_social_links.extend(social_links_main)
+            # 提取社交媒体链接并合并到字典中
+            social_links_main_dict = extract_social_links(soup)
+            for platform, links in social_links_main_dict.items():
+                if platform not in current_site_social_links_dict:
+                    current_site_social_links_dict[platform] = []
+                current_site_social_links_dict[platform].extend(links)
             
             # 递归爬取找到的潜在联系页面（最多爬取前5个，可以根据需求调整）
             # 增加爬取深度，有助于发现深层页面的联系信息
@@ -90,9 +93,12 @@ def crawl_contacts(websites):
                     current_site_emails.extend(contact_emails)
                     current_site_phones.extend(contact_phones)
                     
-                    # 提取联系页面中的社交媒体链接
-                    contact_social_links = extract_social_links(contact_soup)
-                    current_site_social_links.extend(contact_social_links)
+                    # 提取联系页面中的社交媒体链接并合并到字典中
+                    contact_social_links_dict = extract_social_links(contact_soup)
+                    for platform, links in contact_social_links_dict.items():
+                        if platform not in current_site_social_links_dict:
+                            current_site_social_links_dict[platform] = []
+                        current_site_social_links_dict[platform].extend(links)
                     
                     # 短暂延迟，避免请求过快
                     time.sleep(0.5)
@@ -104,7 +110,10 @@ def crawl_contacts(websites):
             # 对所有收集到的联系方式进行去重
             current_site_emails = list(set(current_site_emails))
             current_site_phones = list(set(current_site_phones))
-            current_site_social_links = list(set(current_site_social_links))
+            
+            # 对社交媒体链接进行去重
+            for platform in current_site_social_links_dict:
+                current_site_social_links_dict[platform] = list(set(current_site_social_links_dict[platform]))
             
         except Exception as e:
             # 捕获其他所有通用错误
@@ -116,7 +125,7 @@ def crawl_contacts(websites):
             'emails': current_site_emails,
             'phones': current_site_phones,
             'contact_pages': list(set(current_site_contact_pages)), # 确保联系页面列表也去重
-            'social_links': current_site_social_links,
+            'social_links': current_site_social_links_dict, # 存储分类后的字典
             'error': site_error # 记录主URL的错误信息
         })
         

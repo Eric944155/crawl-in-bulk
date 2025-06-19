@@ -180,7 +180,7 @@ with st.sidebar:
     st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📧 SMTP 配置</h3>', unsafe_allow_html=True)
     
     smtp_server = st.text_input('SMTP 服务器', 'smtp.gmail.com', help="例如: smtp.gmail.com, smtp.qq.com")
-    smtp_port = st.number_input('SMTP 端口', value=587, min_value=1, max_value=65535, help="常用端口: 25, 465, 587 (TLS), 587 (SSL/TLS)")
+    smtp_port = st.number_input('SMTP 端口', value=587, min_value=1, max_value=65535, help="常用端口: 25, 465 (SSL), 587 (TLS)")
     smtp_email = st.text_input('发件人邮箱', help="通常是您的邮箱地址")
     smtp_password = st.text_input('邮箱密码', type='password', help="对于一些邮箱服务，这可能是应用专用密码或授权码")
     use_tls = st.checkbox('使用TLS (推荐)', value=True, help="大多数现代邮件服务器使用TLS加密连接 (端口587)。部分旧服务可能使用SSL (端口465)。")
@@ -207,6 +207,8 @@ with st.sidebar:
                 )
             st.success('SMTP 配置成功!')
             st.session_state.smtp_configured = True
+            st.session_state.smtp_email = smtp_email # Store for later use
+            st.session_state.smtp_password = smtp_password # Store for later use
         except Exception as e:
             st.error(f'SMTP 配置失败: {str(e)}')
             st.session_state.smtp_configured = False
@@ -243,6 +245,7 @@ with st.sidebar:
     with col2:
         contact_count = 0
         if st.session_state.contacts is not None:
+            # Flatten the list of social links for total count, or count rows with contacts
             contact_count = len(st.session_state.contacts)
         st.markdown(
             f'<div class="metric-card" style="padding: 1rem;">'            
@@ -356,6 +359,7 @@ with tab1:
         # 添加清除按钮
         if st.button('清除网址列表', key='clear_websites'):
             st.session_state.websites = None
+            st.session_state.contacts = None # Also clear contacts if websites are cleared
             st.rerun()
         
         st.markdown('</div>', unsafe_allow_html=True)
@@ -419,8 +423,8 @@ with tab2:
                     
                     # 爬取单个网站
                     try:
-                        site_contacts = crawl_contacts(single_site)
-                        contacts.append(site_contacts)
+                        site_contacts_df = crawl_contacts(single_site) # crawl_contacts now returns a DataFrame
+                        contacts.append(site_contacts_df)
                         time.sleep(0.5) # 短暂延迟，避免请求过快
                     except Exception as e:
                         st.error(f"爬取 {row['URL']} 时出错: {str(e)}")
@@ -437,16 +441,24 @@ with tab2:
                     # 显示统计信息
                     email_count = all_contacts['emails'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
                     phone_count = all_contacts['phones'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
-                    
+                    # Calculate total social links count
+                    social_links_count = 0
+                    for index, row in all_contacts.iterrows():
+                        if isinstance(row['social_links'], dict):
+                            for platform_links in row['social_links'].values():
+                                social_links_count += len(platform_links)
+
                     st.markdown('<div style="display: flex; justify-content: space-around; margin-top: 1rem;">', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{len(all_contacts)}</span><br><span style="color: #64748B;">网站</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{email_count}</span><br><span style="color: #64748B;">邮箱</span></div>', unsafe_allow_html=True)
                     st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{phone_count}</span><br><span style="color: #64748B;">电话</span></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #4F6DF5;">{social_links_count}</span><br><span style="color: #64748B;">社媒链接</span></div>', unsafe_allow_html=True)
                     st.markdown('</div>', unsafe_allow_html=True)
                 else:
                     status_text.markdown('<p style="color: #B91C1C; font-weight: bold;">⚠️ 爬取完成，但未找到任何联系方式</p>', unsafe_allow_html=True)
                 
                 st.session_state.crawling = False
+                st.experimental_rerun() # Refresh to show results immediately
             
             st.markdown('</div>', unsafe_allow_html=True)
         
@@ -459,9 +471,9 @@ with tab2:
             st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">爬取内容包括：</p>', unsafe_allow_html=True)
             st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px;">', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接及部分HTML属性中的邮箱)</p>', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0.5rem;">📞 <strong>电话号码</strong></p>', unsafe_allow_html=True)
+            st.markdown('<p style="margin-bottom: 0.5rem;">📞 <strong>电话号码</strong> (通过严格正则匹配)</p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">🔗 <strong>联系页面</strong></p>', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong></p>', unsafe_allow_html=True)
+            st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong> (按平台分类)</p>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<br><h4 style="color: #1E293B; font-size: 1rem; margin-bottom: 0.5rem;">💡 注意</h4>', unsafe_allow_html=True)
@@ -474,9 +486,38 @@ with tab2:
             st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
+            # Prepare contacts dataframe for display: flatten social_links dictionary for better display
+            display_df = st.session_state.contacts.copy()
+            
+            # Convert social_links dict to a readable string for display
+            def format_social_links(social_dict):
+                if not isinstance(social_dict, dict) or not social_dict:
+                    return "无"
+                formatted_list = []
+                for platform, links in social_dict.items():
+                    if links:
+                        formatted_list.append(f"{platform}: " + ", ".join(links))
+                return "; ".join(formatted_list)
+            
+            display_df['social_links_formatted'] = display_df['social_links'].apply(format_social_links)
+            
+            # Drop original social_links column and rename the formatted one
+            display_df = display_df.drop(columns=['social_links'])
+            display_df = display_df.rename(columns={'social_links_formatted': '社交媒体链接'})
+
+            # Custom column configuration for better readability
+            column_config = {
+                "url": st.column_config.LinkColumn("网站链接"),
+                "emails": "邮箱地址",
+                "phones": "电话号码",
+                "contact_pages": "联系页面",
+                "社交媒体链接": "社交媒体链接",
+                "error": "错误信息"
+            }
+
             # 创建一个容器来包装数据框
             st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-            st.dataframe(st.session_state.contacts, use_container_width=True)
+            st.dataframe(display_df, use_container_width=True, column_config=column_config)
             st.markdown('</div>', unsafe_allow_html=True)
             
             # 导出功能
@@ -487,11 +528,15 @@ with tab2:
                     st.session_state.download_link_displayed = False
 
                 if st.button('导出数据', key='export_data', use_container_width=True):
-                    # 生成带时间戳的文件名
+                    # For export, transform social_links to JSON string for better CSV handling
+                    export_df = st.session_state.contacts.copy()
+                    export_df['social_links'] = export_df['social_links'].apply(lambda x: str(x) if isinstance(x, dict) else x) # Convert dict to string for CSV
+                    
+                    # Generate filename with timestamp
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     export_filename = f'contacts_{timestamp}.csv'
                     
-                    csv = st.session_state.contacts.to_csv(index=False).encode('utf-8')
+                    csv = export_df.to_csv(index=False).encode('utf-8')
                     b64 = base64.b64encode(csv).decode()
                     href = f'<a href="data:file/csv;base64,{b64}" download="{export_filename}" class="download-link" style="color: var(--primary-color); text-decoration: none;">点击下载 {export_filename}</a>'
                     
@@ -544,9 +589,12 @@ with tab3:
         all_target_emails = [] # 收集所有可发送的邮箱
         for _, row in st.session_state.contacts.iterrows():
             if row['emails'] and isinstance(row['emails'], list) and len(row['emails']) > 0:
-                has_emails = True
                 all_target_emails.extend(row['emails'])
-        email_count = len(set(all_target_emails)) # 对所有邮箱进行去重计数
+        all_target_emails = list(set(all_target_emails)) # 去重
+        email_count = len(all_target_emails)
+        
+        if email_count > 0:
+            has_emails = True
 
         if not has_emails:
             # 美化警告信息
@@ -703,6 +751,6 @@ with tab3:
 
 # 页脚
 st.markdown('<div class="footer" style="margin-top: 3rem; text-align: center; color: #64748B; padding-top: 1rem; border-top: 1px solid #E2E8F0;">', unsafe_allow_html=True)
-st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.0.1 (优化版)</p>', unsafe_allow_html=True)
+st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.1.0 (增强精准版)</p>', unsafe_allow_html=True)
 st.markdown(f'<p>© {datetime.now().year} All Rights Reserved</p>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
