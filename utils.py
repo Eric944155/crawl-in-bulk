@@ -4,10 +4,12 @@ import pandas as pd
 import io # 确保这里导入了io模块
 
 # 社交媒体域名列表
+# Updated to be more specific to profile links and common paths
 SOCIAL_DOMAINS = [
-    'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com',
-    'youtube.com', 'pinterest.com', 'tiktok.com', 'weibo.com',
-    'wechat.com', 'qq.com', 'whatsapp.com', 'telegram.org'
+    'facebook.com/', 'twitter.com/', 'x.com/', 'instagram.com/', 'linkedin.com/company/', 'linkedin.com/in/',
+    'youtube.com/channel/', 'youtube.com/user/', 'youtube.com/', # Adjusted for more common YouTube patterns
+    'pinterest.com/', 'tiktok.com/@', 'weibo.com/',
+    'wechat.com/', 'qq.com/', 'whatsapp.com/', 'telegram.org/'
 ]
 
 # 验证URL格式
@@ -33,7 +35,8 @@ def extract_contacts_from_text(text):
     从文本中提取邮箱、电话、社交媒体链接等联系方式
     """
     # 提取邮箱
-    emails = re.findall(r'[\w\.-]+@[\w\.-]+\.[\w\.-]+', text)
+    # 更标准化的邮箱正则表达式，可以匹配大多数常见邮箱格式
+    emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
     
     # 提取电话号码
     # 改进的正则表达式，尝试匹配常见的电话号码格式，包括可选的国家代码、区号以及各种分隔符
@@ -43,17 +46,17 @@ def extract_contacts_from_text(text):
     # XXX-XXX-XXXX
     # XXX XXX XXXX
     # 允许空格、连字符、括号、点、中间点作为分隔符，至少7位数字（不包括国家代码和区号）
-    phones = re.findall(r'(?:\+\d{1,3}[-.●\s]?)?\(?\d{2,4}\)?[-.●\s]?\d{3,4}[-.●\s]?\d{3,4}(?:[-.●\s]?\d{1,4})?', text) #
+    phones = re.findall(r'(?:\+\d{1,3}[-.●\s]?)?\(?\d{2,4}\)?[-.●\s]?\d{3,4}[-.●\s]?\d{3,4}(?:[-.●\s]?\d{1,4})?', text)
     
-    cleaned_phones = [] #
-    for phone in phones: #
+    cleaned_phones = []
+    for phone in phones:
         # 移除所有非数字字符，只保留数字和可选的开头的'+'
-        cleaned_phone = re.sub(r'[^\d+]', '', phone) #
+        cleaned_phone = re.sub(r'[^\d+]', '', phone)
         # 检查是否以'+'开头且后面是数字，或者直接是纯数字
         if cleaned_phone.startswith('+') and len(cleaned_phone) > 7: # 至少国家代码+7位数字
-            cleaned_phones.append(cleaned_phone) #
+            cleaned_phones.append(cleaned_phone)
         elif not cleaned_phone.startswith('+') and len(cleaned_phone) >= 7: # 至少7位纯数字
-            cleaned_phones.append(cleaned_phone) #
+            cleaned_phones.append(cleaned_phone)
 
     return list(set(emails)), list(set(cleaned_phones)) # 返回去重后的清理过的电话号码
 
@@ -91,6 +94,7 @@ def extract_social_links(soup):
     
     for a in soup.find_all('a', href=True):
         href = a['href']
+        # 检查是否包含社交媒体域名
         if any(domain in href.lower() for domain in SOCIAL_DOMAINS):
             social_links.append(href)
     
@@ -101,30 +105,24 @@ def process_website_file(file):
     """
     处理上传的网站列表文件，返回标准化的DataFrame
     """
-    # 无需再次导入io，因为它已经在文件顶部导入
-    df = None # 初始化df，以防没有任何条件匹配
+    df = None
     
-    # 增加对 StringIO 对象的处理，并使用 hasattr 检查 'name' 属性
     if hasattr(file, 'name') and file.name.endswith('.csv'):
         df = pd.read_csv(file)
     elif hasattr(file, 'name') and file.name.endswith('.txt'):
-        # 对于txt文件，读取并解码
         content = file.read().decode('utf-8', errors='ignore')
         urls = [line.strip() for line in content.splitlines() if line.strip()]
         df = pd.DataFrame({'URL': urls})
     elif isinstance(file, io.StringIO): # 专门处理StringIO对象（例如手动输入）
-        # 对于StringIO，它已经是字符串内容，无需解码
         content = file.read()
         urls = [line.strip() for line in content.splitlines() if line.strip()]
         df = pd.DataFrame({'URL': urls})
     else:
         raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件，或提供有效的网址字符串。")
 
-    # 如果df仍然为None，表示没有有效内容被处理
     if df is None or df.empty:
         raise ValueError("未能从文件中解析出有效数据。请检查文件内容或格式。")
 
-    # 尝试识别URL列
     if 'URL' not in df.columns:
         if len(df.columns) == 1:
             df.columns = ['URL']
@@ -144,7 +142,6 @@ def process_website_file(file):
         except Exception:
             invalid_urls.append(url)
 
-    # 返回DataFrame
     if not cleaned_urls:
         raise ValueError("未找到任何有效网址，请检查文件内容")
 
