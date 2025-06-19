@@ -552,8 +552,6 @@ column_config = {
 st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
 st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
 st.markdown('</div>', unsafe_allow_html=True)
-st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
-            st.markdown('</div>', unsafe_allow_html=True)
             
             # 导出功能
             export_col1, export_col2 = st.columns([1, 3])
