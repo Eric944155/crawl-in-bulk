@@ -491,67 +491,67 @@ with tab2:
             
             # --- 社交媒体筛选逻辑：按平台单列展示 ---
 
-# 1. 获取所有可能的社交媒体平台
-all_possible_platforms = set()
-for _, row in st.session_state.contacts.iterrows():
-    if isinstance(row['social_links'], dict):
-        all_possible_platforms.update(row['social_links'].keys())
-sorted_platforms = sorted(list(all_possible_platforms))
+            # 1. 获取所有可能的社交媒体平台
+            all_possible_platforms = set()
+            for _, row in st.session_state.contacts.iterrows():
+                if isinstance(row['social_links'], dict):
+                    all_possible_platforms.update(row['social_links'].keys())
+            sorted_platforms = sorted(list(all_possible_platforms))
 
-# 2. 创建单选下拉框
-selected_platform = st.selectbox(
-    '选择要展示的社交媒体平台',
-    options=sorted_platforms,
-    index=0,
-    help='选择一个平台，仅展示该平台的社交媒体链接'
-)
+            # 2. 创建单选下拉框
+            selected_platform = st.selectbox(
+                '选择要展示的社交媒体平台',
+                options=sorted_platforms,
+                index=0,
+                help='选择一个平台，仅展示该平台的社交媒体链接'
+            )
 
-# 3. 提取指定平台的链接为单独列
+            # 3. 提取指定平台的链接为单独列
 
-def extract_platform_column(social_dict, platform):
-    if isinstance(social_dict, dict) and platform in social_dict:
-        links = social_dict[platform]
-        if links:
-            return "<br>".join([
-                f'<a href="{link}" target="_blank">{link.split("//")[-1].split("/")[0]}</a>' for link in links
-            ])
-    return "无"
+            def extract_platform_column(social_dict, platform):
+                if isinstance(social_dict, dict) and platform in social_dict:
+                    links = social_dict[platform]
+                    if links:
+                        return "<br>".join([
+                            f'<a href="{link}" target="_blank">{link.split("//")[-1].split("/")[0]}</a>' for link in links
+                        ])
+                return "无"
 
-# 4. 创建展示用 DataFrame，只展示选中的平台列
-display_df = st.session_state.contacts.copy()
-display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(
-    lambda x: extract_platform_column(x, selected_platform)
-)
+            # 4. 创建展示用 DataFrame，只展示选中的平台列
+            display_df = st.session_state.contacts.copy()
+            display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(
+                lambda x: extract_platform_column(x, selected_platform)
+            )
 
-# 5. 删除原始社交媒体列
-if 'social_links' in display_df.columns:
-    display_df = display_df.drop(columns=['social_links'])
+            # 5. 删除原始社交媒体列
+            if 'social_links' in display_df.columns:
+                display_df = display_df.drop(columns=['social_links'])
 
-# 6. 仅保留所需列进行展示
-columns_to_show = [
-    col for col in ["url", "emails", "phones", "contact_pages", f"{selected_platform} 链接", "error"]
-    if col in display_df.columns
-]
-display_df = display_df[columns_to_show]
+            # 6. 仅保留所需列进行展示
+            columns_to_show = [
+                col for col in ["url", "emails", "phones", "contact_pages", f"{selected_platform} 链接", "error"]
+                if col in display_df.columns
+            ]
+            display_df = display_df[columns_to_show]
 
-# 7. 配置列信息
-column_config = {
-    "url": st.column_config.LinkColumn("网站链接"),
-    "emails": "邮箱地址",
-    "phones": "电话号码",
-    "contact_pages": "联系页面",
-    f"{selected_platform} 链接": st.column_config.Column(
-        f"{selected_platform} 链接",
-        help=f"仅显示 {selected_platform} 的社交媒体链接",
-        width="large"
-    ),
-    "error": "错误信息"
-}
+            # 7. 配置列信息
+            column_config = {
+                "url": st.column_config.LinkColumn("网站链接"),
+                "emails": "邮箱地址",
+                "phones": "电话号码",
+                "contact_pages": "联系页面",
+                f"{selected_platform} 链接": st.column_config.Column(
+                    f"{selected_platform} 链接",
+                    help=f"仅显示 {selected_platform} 的社交媒体链接",
+                    width="large"
+                ),
+                "error": "错误信息"
+            }
 
-# 8. 渲染展示 DataFrame
-st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
-st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
-st.markdown('</div>', unsafe_allow_html=True)
+            # 8. 渲染展示 DataFrame
+            st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
+            st.dataframe(display_df, use_container_width=True, column_config=column_config, hide_index=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             
             # 导出功能
             export_col1, export_col2 = st.columns([1, 3])
