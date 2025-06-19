@@ -49,10 +49,25 @@ COMPILED_SOCIAL_PATTERNS = {
 
 # 邮箱反爬归一化函数
 def normalize_email_text(text):
+    """
+    将各种反爬邮箱写法归一化为标准邮箱格式。
+    支持多种混淆写法，如 [at]、(at)、{at}、#at#、-at-、&commat;、＠、[dot]、(dot)、{dot}、#dot#、-dot-、·、点、等。
+    """
     import re
-    text = re.sub(r'\s*[\[\(\{]?at[\]\)\}]?\s*', '@', text, flags=re.I)
-    text = re.sub(r'\s*[\[\(\{]?dot[\]\)\}]?\s*', '.', text, flags=re.I)
-    text = text.replace(' at ', '@').replace(' dot ', '.')
+    if not text or not isinstance(text, str):
+        return ''
+    patterns = [
+        (r'\s?\[at\]\s?|\s?\(at\)\s?|\s?\{at\}\s?|\s?\-at\-|\s?\#at\#|\s?\&commat;|\s?＠|\s?@\s?', '@'),
+        (r'\s?\[dot\]\s?|\s?\(dot\)\s?|\s?\{dot\}\s?|\s?\-dot\-|\s?\#dot\#|\s?·|\s?点|\s?\.\s?', '.'),
+        (r'\s?\[underscore\]\s?|\s?\(underscore\)\s?|\s?\_\s?', '_'),
+        (r'\s?\[dash\]\s?|\s?\(dash\)\s?|\s?\-\s?', '-'),
+        (r'\s?\[plus\]\s?|\s?\(plus\)\s?|\s?\+\s?', '+'),
+        (r'\s?\[at symbol\]\s?', '@'),
+    ]
+    text = text.lower()
+    for pat, repl in patterns:
+        text = re.sub(pat, repl, text, flags=re.I)
+    text = re.sub(r'\s+', '', text)
     return text
 
 # 验证URL格式
