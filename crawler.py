@@ -3,6 +3,10 @@ import requests
 from bs4 import BeautifulSoup
 from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html
 import pandas as pd
+import urllib3
+
+# 禁用SSL警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # 禁用SSL警告
 
 # 强化邮箱抓取，移除电话，结构极简
 
@@ -37,9 +41,8 @@ def robust_get(url, headers, timeout=15):
     2. 处理常见错误（SSL错误、连接超时等）
     3. 智能重试
     4. 处理重定向
+    5. 新增：检查内容是否是JS重定向或WAF挑战页面
     """
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # 禁用SSL警告
     
     tried = set()
     for attempt in range(MAX_RETRIES):
@@ -55,6 +58,9 @@ def robust_get(url, headers, timeout=15):
             
             # 检查是否成功
             if resp.status_code < 400:
+                # 新增：检查常见的JS重定向或WAF挑战模式
+                if '<noscript data-cf-backend="dynamic_page_load">' in resp.text.lower() or 'just a moment' in resp.text.lower():
+                    return None, "WAF/CDN challenge detected, requires dynamic rendering."
                 return resp, None
             else:
                 resp.raise_for_status()  # 触发异常以便捕获
@@ -64,6 +70,9 @@ def robust_get(url, headers, timeout=15):
             try:
                 resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
                 if resp.status_code < 400:
+                    # 新增：检查WAF/CDN挑战
+                    if '<noscript data-cf-backend="dynamic_page_load">' in resp.text.lower() or 'just a moment' in resp.text.lower():
+                        return None, "WAF/CDN challenge detected, requires dynamic rendering."
                     return resp, None
             except Exception as inner_e:
                 pass  # 继续尝试其他方法
@@ -97,6 +106,9 @@ def robust_get(url, headers, timeout=15):
                     try:
                         resp = requests.get(www_url, headers=headers, timeout=timeout, verify=False)
                         if resp.status_code < 400:
+                            # 新增：检查WAF/CDN挑战
+                            if '<noscript data-cf-backend="dynamic_page_load">' in resp.text.lower() or 'just a moment' in resp.text.lower():
+                                return None, "WAF/CDN challenge detected, requires dynamic rendering."
                             return resp, None
                     except Exception:
                         pass  # 忽略错误，继续尝试
@@ -135,24 +147,49 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
         current_site_emails = set()
         social_links_main_dict = {}
         error_msgs = []
-        # 1. 主页面请求
+        soup = None # Initialize soup for requests
+        soup_selenium = None # Initialize soup for selenium
+
+        # 1. 主页面请求 (Requests)
         resp, err = robust_get(base_url, headers)
-        if err:
-            error_msgs.append(f'{base_url}: {err}')
-            soup = None
-        else:
+        if err and "WAF/CDN challenge detected" not in err: # If not a WAF/CDN error, record it as a general error
+            error_msgs.append(f'Requests main page error for {base_url}: {err}')
+        elif resp:
             soup = BeautifulSoup(resp.text, 'html.parser')
-            # 2. 主页面邮箱与社媒
             current_site_emails.update(extract_contacts_from_soup(soup, base_url))
             sl = extract_social_links(soup)
             for k, v in sl.items():
                 social_links_main_dict.setdefault(k, set()).update(v)
+
+        # 2. 如果通过 requests 没有找到足够的邮箱，或者遇到WAF/CDN挑战，则尝试 Selenium
+        # 阈值可以根据实际情况调整，例如：len(current_site_emails) == 0
+        should_use_selenium_for_main = use_selenium and (not current_site_emails or ("WAF/CDN challenge detected" in str(err)))
+        
+        if should_use_selenium_for_main:
+            try:
+                # 尝试主页的动态渲染
+                # 增加wait_time，确保JS充分加载
+                html_selenium = get_rendered_html(base_url, wait_time=10) # 适当增加等待时间
+                soup_selenium = BeautifulSoup(html_selenium, 'html.parser')
+                emails_selenium = extract_contacts_from_soup(soup_selenium, base_url)
+                current_site_emails.update(emails_selenium)
+                
+                # 合并社交媒体链接（如果Selenium获取到了）
+                sl_selenium = extract_social_links(soup_selenium)
+                for k, v in sl_selenium.items():
+                    social_links_main_dict.setdefault(k, set()).update(v)
+
+            except Exception as e:
+                error_msgs.append(f'Selenium main page error for {base_url}: {e}')
+
         # 3. 递归所有潜在联系页
+        # 优化联系页面发现逻辑：优先从Selenium生成的soup中提取链接，如果没有，则从requests生成的soup中提取
+        effective_soup_for_links = soup_selenium if should_use_selenium_for_main and soup_selenium else soup
+
         contact_pages = set()
-        if soup:
-            # 更智能地识别联系页面
-            # 1. 检查链接文本
-            for a in soup.find_all('a', href=True):
+        if effective_soup_for_links:
+            # 1. 检查链接文本和href属性
+            for a in effective_soup_for_links.find_all('a', href=True):
                 href = a['href']
                 text = a.get_text().lower().strip()
                 
@@ -160,13 +197,15 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                 if not href or href == '#' or href.startswith('javascript:') or href.startswith('mailto:') or href.startswith('tel:'):
                     continue
                 
+                # 将相对路径转换为绝对路径
+                full_url = requests.compat.urljoin(base_url, href)
+
                 # 检查链接文本和href属性
                 if any(k in href.lower() for k in CONTACT_PAGE_KEYWORDS) or any(k in text for k in CONTACT_PAGE_KEYWORDS):
-                    full_url = requests.compat.urljoin(base_url, href)
                     contact_pages.add(full_url)
             
             # 2. 查找页脚中的联系链接（通常包含联系信息）
-            footer_tags = soup.find_all(['footer', 'div', 'section'], class_=lambda c: c and any(x in str(c).lower() for x in ['footer', 'bottom']))
+            footer_tags = effective_soup_for_links.find_all(['footer', 'div', 'section'], class_=lambda c: c and any(x in str(c).lower() for x in ['footer', 'bottom']))
             for footer in footer_tags:
                 for a in footer.find_all('a', href=True):
                     href = a['href']
@@ -178,73 +217,56 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
         # 限制爬取页面数量，优先处理最可能包含联系信息的页面
         contact_pages = sorted(list(contact_pages), key=lambda url: sum(1 for k in CONTACT_PAGE_KEYWORDS if k in url.lower()), reverse=True)[:max_depth]
         
+        # 遍历联系页面
         for contact_page_url in contact_pages:
-            try:
-                resp2, err2 = robust_get(contact_page_url, headers)
-                if err2:
-                    error_msgs.append(f'{contact_page_url}: {err2}')
-                    continue
-                
+            page_emails = set()
+            page_social_links = {}
+            
+            # 优先尝试 requests
+            resp2, err2 = robust_get(contact_page_url, headers)
+            if err2 and "WAF/CDN challenge detected" not in err2:
+                error_msgs.append(f'Requests contact page error for {contact_page_url}: {err2}')
+                contact_soup = None
+            elif resp2:
                 contact_soup = BeautifulSoup(resp2.text, 'html.parser')
-                
-                # 提取邮箱
-                emails = extract_contacts_from_soup(contact_soup, base_url)
-                current_site_emails.update(emails)
-                
-                # 提取社交媒体链接
+                page_emails.update(extract_contacts_from_soup(contact_soup, base_url))
                 sl2 = extract_social_links(contact_soup)
                 for k, v in sl2.items():
-                    social_links_main_dict.setdefault(k, set()).update(v)
-            except Exception as e:
-                error_msgs.append(f'Error processing {contact_page_url}: {str(e)}')
-                continue
-        # 4. 使用增强的 selenium 动态渲染策略
-        if use_selenium:
-            try:
-                # 首先尝试主页
-                html = get_rendered_html(base_url, wait_time=8)  # 增加等待时间
-                soup = BeautifulSoup(html, 'html.parser')
-                emails_selenium = extract_contacts_from_soup(soup, base_url)
-                current_site_emails.update(emails_selenium)
-                
-                # 如果主页没有找到足够的邮箱，尝试联系页面
-                if len(current_site_emails) < 2 and contact_pages:
-                    # 按关键词相关性排序联系页面
-                    contact_pages.sort(key=lambda url: sum(1 for k in CONTACT_PAGE_KEYWORDS if k in url.lower()), reverse=True)
+                    page_social_links.setdefault(k, set()).update(v)
+
+            # 如果 requests 没有找到邮箱，或者遇到WAF/CDN挑战，则尝试 Selenium
+            should_use_selenium_for_contact = use_selenium and (not page_emails or ("WAF/CDN challenge detected" in str(err2)))
+            
+            if should_use_selenium_for_contact:
+                try:
+                    contact_html_selenium = get_rendered_html(contact_page_url, wait_time=10) # 适当增加等待时间
+                    contact_soup_selenium = BeautifulSoup(contact_html_selenium, 'html.parser')
+                    page_emails.update(extract_contacts_from_soup(contact_soup_selenium, base_url))
                     
-                    # 尝试前两个最可能的联系页面
-                    for contact_page in contact_pages[:2]:
-                        try:
-                            contact_html = get_rendered_html(contact_page, wait_time=8)
-                            contact_soup = BeautifulSoup(contact_html, 'html.parser')
-                            
-                            # 提取联系页面的邮箱
-                            contact_emails = extract_contacts_from_soup(contact_soup, base_url)
-                            current_site_emails.update(contact_emails)
-                            
-                            # 如果找到了足够的邮箱，就停止搜索
-                            if len(current_site_emails) >= 2:
-                                break
-                                
-                        except Exception as e:
-                            error_msgs.append(f'selenium contact page {contact_page}: {e}')
-                            continue
-            except Exception as e:
-                error_msgs.append(f'selenium main page: {e}')
-        
-        # 5. 额外验证所有提取到的邮箱
+                    sl2_selenium = extract_social_links(contact_soup_selenium)
+                    for k, v in sl2_selenium.items():
+                        page_social_links.setdefault(k, set()).update(v)
+
+                except Exception as e:
+                    error_msgs.append(f'Selenium contact page error for {contact_page_url}: {e}')
+                    
+            current_site_emails.update(page_emails)
+            for k, v in page_social_links.items():
+                social_links_main_dict.setdefault(k, set()).update(v)
+
+        # 4. 额外验证所有提取到的邮箱
         from utils import is_valid_email
         validated_emails = set()
         for email in current_site_emails:
             if is_valid_email(email):
                 validated_emails.add(email)
         
-        # 6. 去重整理
+        # 5. 去重整理
         emails_found = list(validated_emails)
         social_links_found = {k: list(v) for k, v in social_links_main_dict.items()}
         error = '\n'.join(error_msgs) if error_msgs else None
         
-        # 7. 添加到结果
+        # 6. 添加到结果
         contacts.append({
             'url': url,
             'emails': emails_found,
@@ -252,6 +274,6 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
             'error': error
         })
         
-        # 8. 防止请求过快
-        time.sleep(2)
+        # 7. 防止请求过快
+        time.sleep(2) # 适当增加延迟，特别是在使用Selenium时，因为Selenium本身有加载时间
     return pd.DataFrame(contacts)

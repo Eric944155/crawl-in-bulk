@@ -74,7 +74,10 @@ EMAIL_BLACKLIST = [
     'facebook', 'twitter', 'instagram', 'linkedin', 'youtube', 'pinterest', 'snapchat', 'tiktok',
     
     # 明显的非邮箱域名
-    'designedand.developedby', 'allrights.reserved', 'all.rightsreserved'
+    'designedand.developedby', 'allrights.reserved', 'all.rightsreserved',
+    
+    # 新增：可能与邮箱混淆的常见词语
+    'placeholder', 'domain', 'your_email', 'your-email', 'name@' 
 ]
 
 def is_valid_email(email):
@@ -101,11 +104,17 @@ def is_valid_email(email):
     # 5. 用户名检查
     if not username or len(username) > 64:
         return False
-    
+    # 新增：用户名不能以.开头或结尾，不能包含连续的.
+    if username.startswith('.') or username.endswith('.') or '..' in username:
+        return False
+
     # 6. 域名检查
     if not domain or len(domain) > 255 or '.' not in domain:
         return False
-    
+    # 新增：域名不能以.开头或结尾，不能包含连续的.
+    if domain.startswith('.') or domain.endswith('.') or '..' in domain:
+        return False
+
     # 7. 域名白名单检查 - 检查TLD、SLD或完整域名是否在白名单中
     domain_parts = domain.split('.')
     tld = domain_parts[-1] if domain_parts else ''
@@ -120,9 +129,15 @@ def is_valid_email(email):
     # 检查完整域名
     full_match = any(w == domain for w in EMAIL_DOMAIN_WHITELIST)
     
-    if not (tld_match or sld_match or full_match):
-        return False
-    
+    # 新增：如果域名不包含在常见的白名单或其组合中，且不是常见的公共邮件域名，则可能不是有效邮箱
+    if not (tld_match or sld_match or full_match or 
+            any(common_domain in domain for common_domain in 
+                ['gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'qq.com', '163.com', '126.com', 'sina.com'])):
+        # 更严格的验证：如果不在白名单里，且不是常见的公共邮箱域名，则进行更严格的格式检查
+        # 此正则表达式用于验证域名部分，允许子域名和标准顶级域名
+        if not re.match(r'^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.[a-zA-Z]{2,6}$', domain):
+            return False
+            
     # 8. 使用email_validator进行严格验证
     try:
         from email_validator import validate_email, EmailNotValidError
@@ -145,6 +160,7 @@ def extract_valid_emails(text):
     # 更精确的邮箱正则表达式
     # 用户名部分：允许字母、数字、点、下划线、百分号、加号、减号
     # 域名部分：要求至少有一个点，且顶级域名为2-10个字母
+    # 注意：此处的正则匹配的是已经“反混淆”后的文本
     email_pattern = r'[a-zA-Z0-9][a-zA-Z0-9._%+-]{2,63}@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,10}'
     
     # 查找所有可能的邮箱
@@ -164,6 +180,7 @@ def normalize_email_text(text):
     将各种反爬邮箱写法归一化为标准邮箱格式。
     支持多种混淆写法，如 [at]、(at)、{at}、#at#、-at-、&commat;、＠、[dot]、(dot)、{dot}、#dot#、-dot-、·、点、等。
     同时移除可能导致误匹配的内容，如版权信息、年份组合等。
+    新增对ASCII/Unicode转义的解码。
     """
     import re, html
     if not text or not isinstance(text, str):
@@ -187,6 +204,21 @@ def normalize_email_text(text):
     text = html.unescape(text)  # 解码HTML实体
     text = re.sub(r'<[^>]+>', ' ', text)  # 移除HTML标签
     
+    # 新增：解码ASCII和Unicode转义序列
+    def decode_js_escapes(s):
+        def replacer(match):
+            hex_val = match.group(1)
+            try:
+                return chr(int(hex_val, 16))
+            except ValueError:
+                return match.group(0) # Keep original if invalid hex
+        s = re.sub(r'\\u([0-9a-fA-F]{4})', replacer, s) # Unicode escapes \uXXXX
+        s = re.sub(r'\\x([0-9a-fA-F]{2})', replacer, s) # Hex escapes \xXX
+        s = re.sub(r'\\(\d{3})', lambda m: chr(int(m.group(1), 8)), s) # Octal escapes \ddd
+        return s
+
+    text = decode_js_escapes(text)
+
     # 3. 处理各种混淆的邮箱格式
     patterns = [
         # 基本的混淆替换
@@ -334,6 +366,21 @@ def extract_contacts_from_soup(soup, base_url):
             if elem.get('title') and '@' in elem['title']:
                 emails.update(extract_from_text(elem['title']))
     
+    # 3.6 从 <meta> 标签提取
+    for meta in soup.find_all('meta', attrs={'name': lambda x: x and 'email' in x.lower()}):
+        if meta.get('content'):
+            emails.update(extract_from_text(meta['content']))
+
+    # 3.7 从 <script> 标签中的文本提取 (非执行)
+    for script in soup.find_all('script'):
+        if script.string:
+            js_code = script.string
+            # 简单地在JS代码中查找邮箱模式
+            emails.update(extract_from_text(js_code))
+            # 尝试解码常见的JS字符串混淆 (例如 "\x40" -> "@")
+            decoded_js_code = normalize_email_text(js_code) # 利用现有的normalize_email_text
+            emails.update(extract_from_text(decoded_js_code))
+            
     # 4. 验证所有提取到的邮箱
     valid_emails = set()
     for email in emails:
@@ -365,7 +412,7 @@ def extract_contact_pages(soup, base_url):
             href = urljoin(base_url, href)
         
         # 确保是有效URL
-        if not validate_url(href):
+        if not validators.url(href):
             continue
 
         # 检查链接文本或URL中是否包含联系关键词
@@ -488,7 +535,7 @@ def get_rendered_html(url, wait_time=5):
             
             # 尝试点击可能的展开按钮或"显示更多"链接
             try:
-                buttons = driver.find_elements(By.XPATH, "//*[contains(text(), 'more') or contains(text(), 'Show') or contains(text(), 'expand') or contains(text(), '更多') or contains(text(), '展开')]") 
+                buttons = driver.find_elements(By.XPATH, "//*[contains(text(), 'more') or contains(text(), 'Show') or contains(text(), 'expand') or contains(text(), '更多') or contains(text(), '展开')]")
                 for button in buttons[:3]:  # 限制尝试次数
                     try:
                         button.click()

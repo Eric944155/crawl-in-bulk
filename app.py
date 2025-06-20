@@ -498,7 +498,7 @@ with tab2:
                         all_platforms.update(links.keys())
                 all_platforms = sorted(list(all_platforms))
                 if not all_platforms:
-                    all_platforms = ['facebook']  # 兜底，防止无社媒时报错
+                    all_platforms = ['(无社交链接)']  # 兜底，防止无社媒时报错
                 # 下拉选择社交平台
                 selected_platform = st.selectbox("选择社交平台", all_platforms, index=0)
                 def get_links_str(social_links, platform):
@@ -506,9 +506,15 @@ with tab2:
                         return ', '.join(social_links[platform])
                     return '无'
                 display_df = contacts_df.copy()
-                display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
+                if selected_platform == '(无社交链接)':
+                    display_df["社交链接"] = "无"
+                else:
+                    display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
                 # 只展示核心列
-                columns_to_show = ["url", "emails", f"{selected_platform} 链接", "error"]
+                columns_to_show = ["url", "emails"]
+                if selected_platform != '(无社交链接)':
+                    columns_to_show.append(f"{selected_platform} 链接")
+                columns_to_show.append("error")
                 display_df = display_df[columns_to_show]
                 # 展示表格
                 st.dataframe(display_df, use_container_width=True)
