@@ -322,7 +322,7 @@ def extract_contacts_from_soup(soup, base_url):
                 emails.update(extract_from_text(value))
     
     # 3.4 从注释中提取
-    from bs4.Comment import Comment
+    from bs4 import Comment
     for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         if '@' in comment:
             emails.update(extract_from_text(comment))
