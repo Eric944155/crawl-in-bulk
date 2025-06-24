@@ -4,9 +4,9 @@ import time
 import os
 import base64
 from datetime import datetime
-from crawler import crawl_contacts
+from crawler import crawl_contacts # This will now include theHarvester integration
 from mailer import send_bulk_email, configure_smtp, DEFAULT_EMAIL_TEMPLATE
-from utils import process_website_file
+from utils import process_website_file, extract_domain_from_url # Import extract_domain_from_url
 
 # 设置页面配置
 st.set_page_config(
@@ -92,7 +92,7 @@ def local_css():
         .dataframe-container {
             border-radius: 10px;
             overflow: hidden;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            box_shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         }
         
         /* 侧边栏样式 */
@@ -271,7 +271,7 @@ with st.sidebar:
 # 创建主要内容区域的选项卡
 tab1, tab2, tab3 = st.tabs(["1️⃣ 上传网站列表", "2️⃣ 爬取联系方式", "3️⃣ 邮件群发"])
 
-# Tab 1: 上传网站列表
+# Tab 1: Upload Website List
 with tab1:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">上传网站列表</h2>', unsafe_allow_html=True)
     st.markdown('<p style="color: #64748B; margin-bottom: 2rem;">请通过文件导入或手动输入方式添加您需要爬取的网站列表</p>', unsafe_allow_html=True)
@@ -296,7 +296,7 @@ with tab1:
             st.markdown("""
             - **TXT 文件**: 每行一个网址
             - **CSV 文件**: 包含 URL 列，每行一个网址
-            - 网址格式: 建议包含 http:// 或 https:// 前缀，例如：`https://example.com`
+            - 网址格式: 建议包含 `http://` 或 `https://` 前缀，例如：`https://example.com`
             """)
         
         if uploaded_file is not None:
@@ -366,7 +366,7 @@ with tab1:
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-# Tab 2: 爬取联系方式
+# Tab 2: Crawl Contacts
 with tab2:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">爬取联系方式</h2>', unsafe_allow_html=True)
     
@@ -380,19 +380,19 @@ with tab2:
             unsafe_allow_html=True
         )
         
-        # 添加快速跳转按钮
+        # Add quick jump button
         if st.button('前往上传网站列表', use_container_width=True):
-            # 使用JavaScript切换到第一个选项卡
+            # Use JavaScript to switch to the first tab
             st.markdown(
                 """<script>document.querySelector('[data-baseweb="tab"]').click();</script>""",
                 unsafe_allow_html=True
             )
     else:
-        # 创建两列布局
+        # Create two-column layout
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            # 爬取控制面板
+            # Crawl control panel
             st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); margin-bottom: 1.5rem;">',
                         unsafe_allow_html=True)
             
@@ -400,7 +400,7 @@ with tab2:
                 st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">🔍 开始爬取</h3>', unsafe_allow_html=True)
                 st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备爬取 {len(st.session_state.websites)} 个网站的联系方式</p>', unsafe_allow_html=True)
                 
-                # 爬取按钮
+                # Crawl button
                 start_crawl = st.button('开始爬取联系方式', key='start_crawl', use_container_width=True)
                 
                 if start_crawl:
@@ -409,40 +409,43 @@ with tab2:
             else:
                 st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">🔄 正在爬取中...</h3>', unsafe_allow_html=True)
                 
-                # 创建进度条和状态文本
+                # Create progress bar and status text
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # 开始爬取
+                # Start crawling
                 websites = st.session_state.websites
                 total_sites = len(websites)
                 
-                contacts = []
+                contacts_list = [] # Use a list to collect DataFrames
                 for i, (_, row) in enumerate(websites.iterrows()):
-                    # 创建单行DataFrame
+                    # Create single-row DataFrame
                     single_site = pd.DataFrame([row])
-                    status_text.markdown(f'<p style="color: #4F6DF5;">正在爬取 {i+1}/{total_sites}: <strong>{row["URL"]}</strong></p>', unsafe_allow_html=True)
                     
-                    # 爬取单个网站
+                    # Update status message with current URL and domain for theHarvester
+                    current_url = row["URL"]
+                    current_domain = extract_domain_from_url(current_url)
+                    status_text.markdown(f'<p style="color: #4F6DF5;">正在爬取 {i+1}/{total_sites}: <strong>{current_url}</strong> (域名: {current_domain if current_domain else "无法提取"})</p>', unsafe_allow_html=True)
+                    
+                    # Crawl single website
                     try:
                         site_contacts_df = crawl_contacts(single_site) # crawl_contacts now returns a DataFrame
-                        contacts.append(site_contacts_df)
-                        time.sleep(0.5) # 短暂延迟，避免请求过快
+                        contacts_list.append(site_contacts_df)
+                        time.sleep(0.5) # Short delay to avoid too many requests
                     except Exception as e:
-                        st.error(f"爬取 {row['URL']} 时出错: {str(e)}")
+                        st.error(f"爬取 {current_url} 时出错: {str(e)}")
                     
-                    # 更新进度条
+                    # Update progress bar
                     progress_bar.progress((i + 1) / total_sites)
                 
-                # 合并结果
-                if contacts:
-                    all_contacts = pd.concat(contacts, ignore_index=True)
+                # Concatenate all results
+                if contacts_list:
+                    all_contacts = pd.concat(contacts_list, ignore_index=True)
                     st.session_state.contacts = all_contacts
                     status_text.markdown('<p style="color: #047857; font-weight: bold;">✅ 爬取完成！</p>', unsafe_allow_html=True)
                     
-                    # 显示统计信息
+                    # Display statistics
                     email_count = all_contacts['emails'].apply(lambda x: len(x) if isinstance(x, list) else 0).sum()
-                    # Calculate total social links count
                     social_links_count = 0
                     for index, row in all_contacts.iterrows():
                         if isinstance(row['social_links'], dict):
@@ -463,72 +466,66 @@ with tab2:
             st.markdown('</div>', unsafe_allow_html=True)
         
         with col2:
-            # 爬取设置卡片
+            # Crawl settings card
             st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); height: 100%;">',
                         unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">⚙️ 爬取设置</h3>', unsafe_allow_html=True)
             
             st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">爬取内容包括：</p>', unsafe_allow_html=True)
             st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px;">', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接及部分HTML属性中的邮箱)</p>', unsafe_allow_html=True)
+            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接、部分HTML属性中提取，<br>并**整合 theHarvester 结果**)</p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">🔗 <strong>联系页面</strong></p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong> (按平台分类)</p>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<br><h4 style="color: #1E293B; font-size: 1rem; margin-bottom: 0.5rem;">💡 注意</h4>', unsafe_allow_html=True)
-            st.markdown('<p style="color: #64748B; font-size: 0.9rem;">本工具通过解析静态HTML内容进行爬取。对于大量依赖JavaScript动态加载内容的网站，可能无法获取所有联系方式。</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color: #64748B; font-size: 0.9rem;">本工具通过解析静态HTML内容及调用 theHarvester 进行爬取。对于大量依赖JavaScript动态加载内容的网站，以及 theHarvester 无法触及的私有信息，可能无法获取所有联系方式。</p>', unsafe_allow_html=True)
 
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # 显示爬取结果
+        # Display crawl results
         if st.session_state.contacts is not None and len(st.session_state.contacts) > 0:
             st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 爬取结果</h3>', unsafe_allow_html=True)
             
-            # ========== 动态社媒下拉框功能集成 ========== 
-            # 替换原有静态facebook链接列与导出逻辑
+            # ========== Dynamic Social Media Dropdown Integration ========== 
+            # Replace existing static facebook link column and export logic
 
-            # 假定 contacts_df 为已处理的 DataFrame，包含 social_links 字段
+            # Assume contacts_df is the processed DataFrame, containing social_links field
             if 'contacts' in st.session_state and st.session_state.contacts is not None:
                 contacts_df = st.session_state.contacts.copy()
-                # 统计所有出现过的社交平台
+                # Count all social platforms that have appeared
                 all_platforms = set()
                 for links in contacts_df['social_links']:
                     if isinstance(links, dict):
                         all_platforms.update(links.keys())
                 all_platforms = sorted(list(all_platforms))
                 if not all_platforms:
-                    all_platforms = ['(无社交链接)']  # 兜底，防止无社媒时报错
-                # 下拉选择社交平台
+                    all_platforms = ['facebook']  # Fallback, to prevent errors if no social media found
+                # Dropdown to select social media platform
                 selected_platform = st.selectbox("选择社交平台", all_platforms, index=0)
                 def get_links_str(social_links, platform):
                     if isinstance(social_links, dict) and platform in social_links:
                         return ', '.join(social_links[platform])
                     return '无'
                 display_df = contacts_df.copy()
-                if selected_platform == '(无社交链接)':
-                    display_df["社交链接"] = "无"
-                else:
-                    display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
-                # 只展示核心列
-                columns_to_show = ["url", "emails"]
-                if selected_platform != '(无社交链接)':
-                    columns_to_show.append(f"{selected_platform} 链接")
-                columns_to_show.append("error")
+                display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
+                # Only display core columns
+                columns_to_show = ["url", "emails", f"{selected_platform} 链接", "error"]
                 display_df = display_df[columns_to_show]
-                # 展示表格
+                # Display table
                 st.dataframe(display_df, use_container_width=True)
-                # 导出当前平台数据
+                # Export current platform data
                 csv = display_df.to_csv(index=False).encode('utf-8')
                 st.download_button('导出数据', csv, file_name='contacts_export.csv', mime='text/csv')
             
             st.markdown('</div>', unsafe_allow_html=True)
 
-# Tab 3: 邮件群发
+# Tab 3: Mail Bulk Send
 with tab3:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">邮件群发</h2>', unsafe_allow_html=True)
     
-    # 添加每日发送数量警示提醒
+    # Add daily sending limit warning
     st.markdown(
         '<div style="background-color: #FFFBEB; color: #9A6C00; border: 1px solid #FAD14A; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">'
         '<h5>⚠️ 邮件发送数量警示</h5>'
@@ -541,7 +538,7 @@ with tab3:
     )
 
     if st.session_state.contacts is None or len(st.session_state.contacts) == 0:
-        # 美化警告信息
+        # Beautify warning message
         st.markdown(
             '<div style="background-color: #FEF3C7; color: #92400E; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">'            
             '<h3 style="font-size: 1.2rem; margin-bottom: 0.5rem;">⚠️ 未找到联系人数据</h3>'            
@@ -550,29 +547,29 @@ with tab3:
             unsafe_allow_html=True
         )
         
-        # 添加快速跳转按钮
+        # Add quick jump button
         if st.button('前往爬取联系方式', use_container_width=True):
-            # 使用JavaScript切换到第二个选项卡
+            # Use JavaScript to switch to the second tab
             st.markdown(
                 """<script>document.querySelectorAll('[data-baseweb="tab"]')[1].click();</script>""",
                 unsafe_allow_html=True
             )
     else:
-        # 检查是否有邮箱地址
+        # Check if there are email addresses
         has_emails = False
         email_count = 0
-        all_target_emails = [] # 收集所有可发送的邮箱
+        all_target_emails = [] # Collect all sendable emails
         for _, row in st.session_state.contacts.iterrows():
             if row['emails'] and isinstance(row['emails'], list) and len(row['emails']) > 0:
                 all_target_emails.extend(row['emails'])
-        all_target_emails = list(set(all_target_emails)) # 去重
+        all_target_emails = list(set(all_target_emails)) # Deduplicate
         email_count = len(all_target_emails)
         
         if email_count > 0:
             has_emails = True
 
         if not has_emails:
-            # 美化警告信息
+            # Beautify warning message
             st.markdown(
                 '<div style="background-color: #FEF2F2; color: #991B1B; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">'                
                 '<h3 style="font-size: 1.2rem; margin-bottom: 0.5rem;">❌ 未找到邮箱地址</h3>'                
@@ -581,33 +578,33 @@ with tab3:
                 unsafe_allow_html=True
             )
         else:
-            # 创建两列布局
+            # Create two-column layout
             col1, col2 = st.columns([2, 1])
             
             with col1:
-                # 邮件模板设置卡片
+                # Email template settings card
                 st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); margin-bottom: 1.5rem;">',
                             unsafe_allow_html=True)
                 st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">✉️ 邮件模板设置</h3>', unsafe_allow_html=True)
                 
-                # 邮件主题
+                # Email subject
                 email_subject = st.text_input('邮件主题', '您好，这是一封商务合作邮件')
                 
-                # 邮件模板
+                # Email template
                 st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">邮件内容模板</p>', unsafe_allow_html=True)
                 st.markdown('<p style="color: #64748B; font-size: 0.8rem; margin-bottom: 0.5rem;">可使用以下变量进行个性化：<code>{website_name}</code> (网站名称), <code>{url}</code> (完整网址)</p>', unsafe_allow_html=True)
                 email_template = st.text_area('', DEFAULT_EMAIL_TEMPLATE, height=300, label_visibility="collapsed")
                 
-                # 模板预览
+                # Template preview
                 with st.expander("📝 模板预览"):
-                    # 使用示例数据进行预览
+                    # Use sample data for preview
                     preview_template_content = email_template.replace('{website_name}', '示例公司').replace('{url}', 'https://www.example.com')
                     st.markdown(f"<div style='background-color: #F8FAFC; padding: 1rem; border-radius: 5px;'>{preview_template_content}</div>", unsafe_allow_html=True)
                 
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                # SMTP配置检查
-                # 获取侧边栏的SMTP配置
+                # SMTP configuration check
+                # Get SMTP configuration from sidebar
                 configured_smtp_email = st.session_state.get('smtp_email', '')
                 configured_smtp_password = st.session_state.get('smtp_password', '')
 
@@ -620,22 +617,22 @@ with tab3:
                         unsafe_allow_html=True
                     )
                 else:
-                    # 确保使用最新的SMTP配置
+                    # Ensure the latest SMTP configuration is used
                     try:
                         smtp_config = configure_smtp(
-                            server=smtp_server, # 从侧边栏获取
-                            port=smtp_port,     # 从侧边栏获取
-                            email=smtp_email,   # 从侧边栏获取
-                            password=smtp_password, # 从侧边栏获取
-                            use_tls=use_tls     # 从侧边栏获取
+                            server=smtp_server, # Get from sidebar
+                            port=smtp_port,     # Get from sidebar
+                            email=smtp_email,   # Get from sidebar
+                            password=smtp_password, # Get from sidebar
+                            use_tls=use_tls     # Get from sidebar
                         )
                     except Exception as e:
                         st.error(f"SMTP配置加载失败，请重新测试配置: {str(e)}")
                         smtp_config = None
-                        st.session_state.smtp_configured = False # 标记为未配置，阻止发送
+                        st.session_state.smtp_configured = False # Mark as not configured, prevent sending
 
-                    if smtp_config: # 只有当SMTP配置成功时才显示发送界面
-                        # 发送邮件控制面板
+                    if smtp_config: # Only display sending interface if SMTP is successfully configured
+                        # Send email control panel
                         st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);">',
                                     unsafe_allow_html=True)
                         
@@ -643,7 +640,7 @@ with tab3:
                             st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📤 开始发送</h3>', unsafe_allow_html=True)
                             st.markdown(f'<p style="color: #64748B; margin-bottom: 1rem;">准备向 <strong>{email_count}</strong> 个邮箱地址发送邮件</p>', unsafe_allow_html=True)
                             
-                            # 发送邮件按钮
+                            # Send email button
                             send_col1, send_col2 = st.columns([3, 1])
                             with send_col1:
                                 start_send = st.button('开始群发邮件', key='start_send', use_container_width=True)
@@ -653,7 +650,7 @@ with tab3:
                             if start_send:
                                 st.session_state.sending = True
                                 
-                                # 开始发送邮件
+                                # Start sending emails
                                 with st.spinner('正在发送邮件...'):
                                     send_log = send_bulk_email(
                                         contacts=st.session_state.contacts,
@@ -664,10 +661,10 @@ with tab3:
                                         interval_seconds=interval_seconds
                                     )
                                 
-                                # 显示发送结果
+                                # Display sending results
                                 st.success('✅ 邮件发送完成！')
                                 
-                                # 显示发送统计
+                                # Display sending statistics
                                 success_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'success')
                                 failed_count = sum(1 for _, row in send_log.iterrows() if row['status'] == 'failed')
                                 
@@ -678,15 +675,15 @@ with tab3:
                                 st.markdown(f'<div style="text-align: center;"><span style="font-size: 1.5rem; font-weight: bold; color: #B91C1C;">{failed_count}</span><br><span style="color: #64748B;">失败</span></div>', unsafe_allow_html=True)
                                 st.markdown('</div>', unsafe_allow_html=True)
                                 
-                                # 显示发送日志
+                                # Display sending log
                                 st.markdown('<h4 style="color: #1E293B; font-size: 1rem; margin: 1rem 0;">📋 发送日志</h4>', unsafe_allow_html=True)
                                 st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
                                 st.dataframe(send_log, use_container_width=True)
                                 st.markdown('</div>', unsafe_allow_html=True)
                                 
-                                # 导出日志按钮
+                                # Export log button
                                 if st.button('导出发送日志', key='export_log'):
-                                    # 生成带时间戳的文件名
+                                    # Generate timestamped filename
                                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                                     log_filename = f'email_log_{timestamp}.csv'
                                     log_csv = send_log.to_csv(index=False).encode('utf-8')
@@ -700,19 +697,19 @@ with tab3:
                         st.markdown('</div>', unsafe_allow_html=True)
             
             with col2:
-                # 邮件发送统计卡片
+                # Email sending statistics card
                 st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); height: 100%;">',
                             unsafe_allow_html=True)
                 st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📊 邮件统计</h3>', unsafe_allow_html=True)
                 
-                # 显示统计信息
+                # Display statistics
                 st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px; margin-bottom: 1rem;">', unsafe_allow_html=True)
                 st.markdown(f'<p><strong>可发送邮箱数量:</strong> <span style="color: #4F6DF5; font-weight: bold;">{email_count}</span></p>', unsafe_allow_html=True)
                 st.markdown(f'<p><strong>每日发送上限:</strong> <span style="color: #4F6DF5;">{daily_limit}</span></p>', unsafe_allow_html=True)
                 st.markdown(f'<p><strong>发送间隔:</strong> <span style="color: #4F6DF5;">{interval_seconds}秒</span></p>', unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
-                # 邮件发送提示
+                # Email sending tips
                 st.markdown('<h4 style="color: #1E293B; font-size: 1rem; margin-bottom: 0.5rem;">📝 发送提示</h4>', unsafe_allow_html=True)
                 st.markdown('<ul style="color: #64748B; padding-left: 1.5rem;">', unsafe_allow_html=True)
                 st.markdown('<li>确保SMTP服务器配置正确</li>', unsafe_allow_html=True)
@@ -724,7 +721,7 @@ with tab3:
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
-# 页脚
+# Footer
 st.markdown('<div class="footer" style="margin-top: 3rem; text-align: center; color: #64748B; padding-top: 1rem; border-top: 1px solid #E2E8F0;">', unsafe_allow_html=True)
 st.markdown('<p>📧 批量联系方式爬取与群发工具 | 版本 1.1.1 (社媒筛选优化)</p>', unsafe_allow_html=True)
 st.markdown(f'<p>© {datetime.now().year} All Rights Reserved</p>', unsafe_allow_html=True)
