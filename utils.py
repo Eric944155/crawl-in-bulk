@@ -535,7 +535,8 @@ def process_website_file(file):
         df = pd.DataFrame({'URL': urls})
     elif isinstance(file, io.StringIO): # 专门处理StringIO对象（例如手动输入）
         content = file.read()
-        urls = [line.strip() for line in content.splitlines() if url.strip()]
+        # 修正：手动输入时，确保每行非空网址被正确提取
+        urls = [line.strip() for line in content.splitlines() if line.strip()] # 关键修正行
         df = pd.DataFrame({'URL': urls})
     else:
         raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件，或提供有效的网址字符串。")
@@ -561,13 +562,10 @@ def process_website_file(file):
 
     # 清理 + 验证URL
     cleaned_urls = []
-    # invalid_urls = [] # 暂时不需要记录无效URL，直接过滤掉
     for url in df['URL']:
         url = clean_url(str(url))
         if validate_url(url):
             cleaned_urls.append(url)
-        # else:
-            # invalid_urls.append(url) # 可以选择在此处记录并通知用户
 
     if not cleaned_urls:
         raise ValueError("未找到任何有效网址，请检查文件内容或输入格式。")
