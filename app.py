@@ -6,7 +6,7 @@ import base64
 from datetime import datetime
 from crawler import crawl_contacts # This will now include theHarvester integration
 from mailer import send_bulk_email, configure_smtp, DEFAULT_EMAIL_TEMPLATE
-from utils import process_website_file, extract_domain_from_url # Import extract_domain_from_url
+from utils import process_website_file # Removed extract_domain_from_url import
 
 # 设置页面配置
 st.set_page_config(
@@ -92,7 +92,7 @@ def local_css():
         .dataframe-container {
             border-radius: 10px;
             overflow: hidden;
-            box_shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
         }
         
         /* 侧边栏样式 */
@@ -276,22 +276,22 @@ with tab1:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">上传网站列表</h2>', unsafe_allow_html=True)
     st.markdown('<p style="color: #64748B; margin-bottom: 2rem;">请通过文件导入或手动输入方式添加您需要爬取的网站列表</p>', unsafe_allow_html=True)
     
-    # 创建两个卡片式列
+    # Create two card-style columns
     col1, col2 = st.columns(2, gap="large")
     
     with col1:
-        # 文件导入卡片
+        # File import card
         st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); height: 100%;">',
                     unsafe_allow_html=True)
         st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">📁 从文件导入</h3>', unsafe_allow_html=True)
         
-        # 文件上传区域美化
+        # File upload area beautification
         st.markdown('<div style="border: 2px dashed #E2E8F0; border-radius: 10px; padding: 1.5rem; text-align: center; margin-bottom: 1rem;">', unsafe_allow_html=True)
         st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">支持 TXT 或 CSV 格式文件</p>', unsafe_allow_html=True)
         uploaded_file = st.file_uploader('', type=['txt', 'csv'], label_visibility="collapsed")
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # 文件格式说明
+        # File format instructions
         with st.expander("文件格式说明"):
             st.markdown("""
             - **TXT 文件**: 每行一个网址
@@ -301,7 +301,7 @@ with tab1:
         
         if uploaded_file is not None:
             try:
-                # 处理上传的文件
+                # Process uploaded file
                 with st.spinner('正在处理文件...'):
                     websites_df = process_website_file(uploaded_file)
                     st.session_state.websites = websites_df
@@ -312,16 +312,16 @@ with tab1:
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
-        # 手动输入卡片
+        # Manual input card
         st.markdown('<div style="background-color: white; padding: 1.5rem; border-radius: 10px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05); height: 100%;">',
                     unsafe_allow_html=True)
         st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">✏️ 手动输入</h3>', unsafe_allow_html=True)
         
-        # 文本输入区域美化
+        # Text input area beautification
         st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">每行输入一个网址</p>', unsafe_allow_html=True)
         manual_urls = st.text_area('', placeholder='例如:\nhttps://example.com\nhttps://another-site.com', height=150, label_visibility="collapsed")
         
-        # 添加按钮
+        # Add button
         add_button = st.button('添加网址', use_container_width=True)
         
         if add_button:
@@ -331,11 +331,11 @@ with tab1:
                             with st.spinner('正在处理网址...'):
                                 try:
                                     from io import StringIO
-                                    # 将手动输入的URLs字符串连接起来，模拟一个txt文件的内容
+                                    # Concatenate manually entered URLs string to simulate a txt file content
                                     file_content_string = "\n".join(urls)
                                     file_content = StringIO(file_content_string)
                             
-                                    # 直接将StringIO对象传递给process_website_file函数
+                                    # Pass StringIO object directly to process_website_file function
                                     websites_df = process_website_file(file_content)
                                     st.session_state.websites = websites_df
                                     st.success(f'✅ 成功添加 {len(websites_df)} 个有效网址')
@@ -348,17 +348,17 @@ with tab1:
         
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # 显示导入的网址列表
+    # Display imported website list
     if st.session_state.websites is not None and len(st.session_state.websites) > 0:
         st.markdown('<div style="margin-top: 2rem;">', unsafe_allow_html=True)
         st.markdown('<h3 style="color: #1E293B; font-size: 1.2rem; margin-bottom: 1rem;">🔍 网址列表预览</h3>', unsafe_allow_html=True)
         
-        # 创建一个容器来包装数据框
+        # Create a container to wrap the DataFrame
         st.markdown('<div class="dataframe-container">', unsafe_allow_html=True)
         st.dataframe(st.session_state.websites, use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # 添加清除按钮
+        # Add clear button
         if st.button('清除网址列表', key='clear_websites'):
             st.session_state.websites = None
             st.session_state.contacts = None # Also clear contacts if websites are cleared
@@ -371,7 +371,7 @@ with tab2:
     st.markdown('<h2 style="color: #1E293B; margin-bottom: 1.5rem;">爬取联系方式</h2>', unsafe_allow_html=True)
     
     if st.session_state.websites is None or len(st.session_state.websites) == 0:
-        # 美化警告信息
+        # Beautify warning message
         st.markdown(
             '<div style="background-color: #FEF3C7; color: #92400E; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">'            
             '<h3 style="font-size: 1.2rem; margin-bottom: 0.5rem;">⚠️ 未找到网站列表</h3>'            
@@ -421,11 +421,7 @@ with tab2:
                 for i, (_, row) in enumerate(websites.iterrows()):
                     # Create single-row DataFrame
                     single_site = pd.DataFrame([row])
-                    
-                    # Update status message with current URL and domain for theHarvester
-                    current_url = row["URL"]
-                    current_domain = extract_domain_from_url(current_url)
-                    status_text.markdown(f'<p style="color: #4F6DF5;">正在爬取 {i+1}/{total_sites}: <strong>{current_url}</strong> (域名: {current_domain if current_domain else "无法提取"})</p>', unsafe_allow_html=True)
+                    status_text.markdown(f'<p style="color: #4F6DF5;">正在爬取 {i+1}/{total_sites}: <strong>{row["URL"]}</strong></p>', unsafe_allow_html=True)
                     
                     # Crawl single website
                     try:
@@ -433,7 +429,7 @@ with tab2:
                         contacts_list.append(site_contacts_df)
                         time.sleep(0.5) # Short delay to avoid too many requests
                     except Exception as e:
-                        st.error(f"爬取 {current_url} 时出错: {str(e)}")
+                        st.error(f"爬取 {row['URL']} 时出错: {str(e)}")
                     
                     # Update progress bar
                     progress_bar.progress((i + 1) / total_sites)
@@ -473,13 +469,13 @@ with tab2:
             
             st.markdown('<p style="color: #64748B; margin-bottom: 0.5rem;">爬取内容包括：</p>', unsafe_allow_html=True)
             st.markdown('<div style="background-color: #F8FAFC; padding: 1rem; border-radius: 5px;">', unsafe_allow_html=True)
-            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接、部分HTML属性中提取，<br>并**整合 theHarvester 结果**)</p>', unsafe_allow_html=True)
+            st.markdown('<p style="margin-bottom: 0.5rem;">✉️ <strong>邮箱地址</strong> (包含文本、mailto链接及部分HTML属性中的邮箱)</p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0.5rem;">🔗 <strong>联系页面</strong></p>', unsafe_allow_html=True)
             st.markdown('<p style="margin-bottom: 0;">📱 <strong>社交媒体链接</strong> (按平台分类)</p>', unsafe_allow_html=True)
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.markdown('<br><h4 style="color: #1E293B; font-size: 1rem; margin-bottom: 0.5rem;">💡 注意</h4>', unsafe_allow_html=True)
-            st.markdown('<p style="color: #64748B; font-size: 0.9rem;">本工具通过解析静态HTML内容及调用 theHarvester 进行爬取。对于大量依赖JavaScript动态加载内容的网站，以及 theHarvester 无法触及的私有信息，可能无法获取所有联系方式。</p>', unsafe_allow_html=True)
+            st.markdown('<p style="color: #64748B; font-size: 0.9rem;">本工具通过解析静态HTML内容进行爬取。对于大量依赖JavaScript动态加载内容的网站，可能无法获取所有联系方式。</p>', unsafe_allow_html=True)
 
             st.markdown('</div>', unsafe_allow_html=True)
         

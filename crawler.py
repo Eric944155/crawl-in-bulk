@@ -1,10 +1,8 @@
 import time
 import requests
 from bs4 import BeautifulSoup
-from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html, extract_domain_from_url, is_valid_email # Import new utility
+from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html, is_valid_email
 import pandas as pd
-import subprocess # Import subprocess module
-import json # To parse theHarvester's JSON output
 
 # 强化邮箱抓取，移除电话，结构极简
 
@@ -112,59 +110,6 @@ def robust_get(url, headers, timeout=15):
     
     return None, f'Failed after {MAX_RETRIES} retries'
 
-def run_theharvester(domain, sources="all", limit=50):
-    """
-    Runs theHarvester for a given domain and extracts emails.
-    Returns a list of unique emails found.
-    """
-    emails = set()
-    error_message = None
-
-    try:
-        # theHarvester command with JSON output
-        # -d: domain, -b: sources, -l: limit, --json: output as JSON
-        command = [
-            'theHarvester', '-d', domain, '-b', sources, '-l', str(limit), '--json'
-        ]
-        
-        # Execute the command
-        # capture_output=True: captures stdout and stderr
-        # text=True: decodes stdout/stderr as text
-        # timeout: prevents hanging
-        result = subprocess.run(
-            command, 
-            capture_output=True, 
-            text=True, 
-            check=True, # Raise an exception for non-zero exit codes
-            timeout=120 # Set a timeout for the command (e.g., 120 seconds)
-        )
-
-        # Parse JSON output
-        output_data = json.loads(result.stdout)
-        
-        # Extract emails
-        if 'emails' in output_data:
-            for email_entry in output_data['emails']:
-                if isinstance(email_entry, str): # direct email string
-                    if is_valid_email(email_entry):
-                        emails.add(email_entry)
-                elif isinstance(email_entry, dict) and 'email' in email_entry: # object with 'email' key
-                     if is_valid_email(email_entry['email']):
-                        emails.add(email_entry['email'])
-
-    except FileNotFoundError:
-        error_message = "Error: theHarvester command not found. Please ensure it's installed and in your system's PATH."
-    except subprocess.CalledProcessError as e:
-        error_message = f"theHarvester exited with an error for domain {domain}. Error: {e.stderr}"
-    except subprocess.TimeoutExpired:
-        error_message = f"theHarvester timed out for domain {domain}."
-    except json.JSONDecodeError:
-        error_message = f"Could not parse JSON output from theHarvester for domain {domain}. Raw output: {result.stdout}"
-    except Exception as e:
-        error_message = f"An unexpected error occurred while running theHarvester for domain {domain}: {str(e)}"
-    
-    return list(emails), error_message
-
 
 def crawl_contacts(websites, use_selenium=True, max_depth=2):
     # 增强的请求头和配置
@@ -191,28 +136,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
         current_site_emails = set()
         social_links_main_dict = {}
         error_msgs = []
-
-        # Extract domain for theHarvester
-        domain = extract_domain_from_url(base_url)
-        if not domain:
-            error_msgs.append(f'Could not extract domain from URL: {base_url}')
-            # Skip to next URL if domain extraction fails
-            contacts.append({
-                'url': url_entry,
-                'emails': [],
-                'social_links': {},
-                'error': '\n'.join(error_msgs) if error_msgs else None
-            })
-            time.sleep(2)
-            continue
             
-        # ---------- theHarvester Integration Starts Here ----------
-        harvester_emails, harvester_error = run_theharvester(domain)
-        if harvester_error:
-            error_msgs.append(f'theHarvester error for {domain}: {harvester_error}')
-        current_site_emails.update(harvester_emails)
-        # ---------- theHarvester Integration Ends Here ----------
-
         # 1. 主页面请求
         resp, err = robust_get(base_url, headers)
         if err:

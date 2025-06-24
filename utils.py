@@ -8,21 +8,6 @@ import selenium
 from selenium import webdriver
 from email_validator import validate_email, EmailNotValidError
 
-# New function to extract domain from URL
-def extract_domain_from_url(url):
-    """
-    Extracts the domain name from a given URL.
-    e.g., https://www.example.com/path -> example.com
-    """
-    try:
-        parsed_url = urlparse(url)
-        netloc = parsed_url.netloc
-        if netloc.startswith('www.'):
-            netloc = netloc[4:]
-        return netloc
-    except Exception:
-        return None
-
 # 社交媒体域名和对应的平台名称映射
 # 优化：更全面，更精准的匹配模式
 SOCIAL_MEDIA_PATTERNS = {
@@ -550,7 +535,7 @@ def process_website_file(file):
         df = pd.DataFrame({'URL': urls})
     elif isinstance(file, io.StringIO): # 专门处理StringIO对象（例如手动输入）
         content = file.read()
-        urls = [line.strip() for line in content.splitlines() if line.strip()]
+        urls = [line.strip() for line in content.splitlines() if url.strip()]
         df = pd.DataFrame({'URL': urls})
     else:
         raise ValueError("不支持的文件格式或无效的输入，请上传.csv或.txt文件，或提供有效的网址字符串。")
