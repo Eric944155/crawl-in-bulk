@@ -1,4 +1,5 @@
 import time
+import traceback
 import requests
 from urllib.parse import urlparse, urlunparse
 from bs4 import BeautifulSoup
@@ -150,7 +151,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
             try:
                 current_site_emails.update(extract_contacts_from_soup(soup, base_url))
             except Exception as e:
-                error_msgs.append(f'{base_url} extraction error: {e}')
+                error_msgs.append(f'{base_url} extraction error: {e}\n{traceback.format_exc()}')
             sl = extract_social_links(soup)
             for k, v in sl.items():
                 social_links_main_dict.setdefault(k, set()).update(v)
@@ -200,7 +201,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                     emails = extract_contacts_from_soup(contact_soup, base_url)
                     current_site_emails.update(emails)
                 except Exception as e:
-                    error_msgs.append(f'{contact_page_url} extraction error: {e}')
+                    error_msgs.append(f'{contact_page_url} extraction error: {e}\n{traceback.format_exc()}')
                     continue
                 
                 # 提取社交媒体链接
@@ -220,7 +221,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                     emails_selenium = extract_contacts_from_soup(soup, base_url)
                     current_site_emails.update(emails_selenium)
                 except Exception as e:
-                    error_msgs.append(f'selenium main extraction error: {e}')
+                    error_msgs.append(f'selenium main extraction error: {e}\n{traceback.format_exc()}')
                 
                 # 如果主页没有找到足够的邮箱，尝试联系页面
                 if len(current_site_emails) < 2 and contact_pages:
@@ -238,7 +239,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                                 contact_emails = extract_contacts_from_soup(contact_soup, base_url)
                                 current_site_emails.update(contact_emails)
                             except Exception as inner_e:
-                                error_msgs.append(f'selenium extraction {contact_page}: {inner_e}')
+                                error_msgs.append(f'selenium extraction {contact_page}: {inner_e}\n{traceback.format_exc()}')
                                 continue
                             
                             # 如果找到了足够的邮箱，就停止搜索
@@ -246,10 +247,10 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                                 break
                                 
                         except Exception as e:
-                            error_msgs.append(f'selenium contact page {contact_page}: {e}')
+                            error_msgs.append(f'selenium contact page {contact_page}: {e}\n{traceback.format_exc()}')
                             continue
             except Exception as e:
-                error_msgs.append(f'selenium main page: {e}')
+                error_msgs.append(f'selenium main page: {e}\n{traceback.format_exc()}')
         
         # 5. 额外验证所有提取到的邮箱
         validated_emails = set()

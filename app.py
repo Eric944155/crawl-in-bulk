@@ -1,3 +1,18 @@
+import sys
+from types import ModuleType
+
+try:
+    from bs4.element import Comment as _BS4Comment
+except ImportError:
+    class _BS4Comment(str):  # type: ignore
+        """Fallback Comment stub."""
+        pass
+
+if 'bs4.Comment' not in sys.modules:
+    comment_module = ModuleType('bs4.Comment')
+    comment_module.Comment = _BS4Comment  # type: ignore[attr-defined]
+    sys.modules['bs4.Comment'] = comment_module
+
 import streamlit as st
 import pandas as pd
 import time
