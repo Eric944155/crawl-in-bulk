@@ -1,6 +1,4 @@
 import re
-import sys
-from types import ModuleType
 import validators
 import pandas as pd
 import io 
@@ -9,23 +7,6 @@ from bs4 import BeautifulSoup
 import selenium
 from selenium import webdriver
 from email_validator import validate_email, EmailNotValidError
-
-try:
-    from bs4 import Comment as _BS4Comment
-except ImportError:
-    try:
-        from bs4.element import Comment as _BS4Comment
-    except ImportError:
-        class _BS4Comment(str):
-            """Fallback Comment type when bs4 Comment is unavailable."""
-            pass
-
-if 'bs4.Comment' not in sys.modules:
-    comment_module = ModuleType('bs4.Comment')
-    comment_module.Comment = _BS4Comment
-    sys.modules['bs4.Comment'] = comment_module
-
-Comment = _BS4Comment
 
 # 社交媒体域名和对应的平台名称映射
 # 优化：更全面，更精准的匹配模式
@@ -327,12 +308,7 @@ def extract_contacts_from_soup(soup, base_url):
             if isinstance(val, str) and '@' in val:
                 emails.update(extract_from_text(val))
 
-    # 3.6 从注释中提取
-    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
-        if '@' in comment:
-            emails.update(extract_from_text(comment))
-
-    # 3.7 从脚本、样式和noscript标签中提取
+    # 3.6 从脚本、样式和noscript标签中提取
     for tag in soup.find_all(['script', 'style', 'noscript']):
         content = tag.string
         if isinstance(content, str):
@@ -340,7 +316,7 @@ def extract_contacts_from_soup(soup, base_url):
             if any(token in lowered for token in ['@', '[at]', '(at', '{at', ' at ', ' dot ', '[dot]', '(dot', '{dot']):
                 emails.update(extract_from_text(content))
     
-    # 3.8 从联系相关区域提取
+    # 3.7 从联系相关区域提取
     contact_keywords = ['contact', 'about', 'support', 'help', 'team', '联系', '关于', '支持', '团队']
     
     # 通过ID查找
@@ -379,7 +355,7 @@ def extract_contacts_from_soup(soup, base_url):
             if elem.get('title') and '@' in elem['title']:
                 emails.update(extract_from_text(elem['title']))
     
-    # 3.9 兜底：扫描整页文本，捕获遗漏的邮箱
+    # 3.8 兜底：扫描整页文本，捕获遗漏的邮箱
     full_text = soup.get_text(separator=' ', strip=True)
     if full_text and '@' in full_text:
         emails.update(extract_from_text(full_text))
