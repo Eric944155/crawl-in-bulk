@@ -145,7 +145,10 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
         else:
             soup = BeautifulSoup(resp.text, 'html.parser')
             # 2. 主页面邮箱与社媒
-            current_site_emails.update(extract_contacts_from_soup(soup, base_url))
+            try:
+                current_site_emails.update(extract_contacts_from_soup(soup, base_url))
+            except Exception as e:
+                error_msgs.append(f'{base_url} extraction error: {e}')
             sl = extract_social_links(soup)
             for k, v in sl.items():
                 social_links_main_dict.setdefault(k, set()).update(v)
@@ -191,8 +194,12 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                 contact_soup = BeautifulSoup(resp2.text, 'html.parser')
                 
                 # 提取邮箱
-                emails = extract_contacts_from_soup(contact_soup, base_url)
-                current_site_emails.update(emails)
+                try:
+                    emails = extract_contacts_from_soup(contact_soup, base_url)
+                    current_site_emails.update(emails)
+                except Exception as e:
+                    error_msgs.append(f'{contact_page_url} extraction error: {e}')
+                    continue
                 
                 # 提取社交媒体链接
                 sl2 = extract_social_links(contact_soup)
@@ -207,8 +214,11 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                 # 首先尝试主页
                 html = get_rendered_html(base_url, wait_time=8)  # 增加等待时间
                 soup = BeautifulSoup(html, 'html.parser')
-                emails_selenium = extract_contacts_from_soup(soup, base_url)
-                current_site_emails.update(emails_selenium)
+                try:
+                    emails_selenium = extract_contacts_from_soup(soup, base_url)
+                    current_site_emails.update(emails_selenium)
+                except Exception as e:
+                    error_msgs.append(f'selenium main extraction error: {e}')
                 
                 # 如果主页没有找到足够的邮箱，尝试联系页面
                 if len(current_site_emails) < 2 and contact_pages:
@@ -222,8 +232,12 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                             contact_soup = BeautifulSoup(contact_html, 'html.parser')
                             
                             # 提取联系页面的邮箱
-                            contact_emails = extract_contacts_from_soup(contact_soup, base_url)
-                            current_site_emails.update(contact_emails)
+                            try:
+                                contact_emails = extract_contacts_from_soup(contact_soup, base_url)
+                                current_site_emails.update(contact_emails)
+                            except Exception as inner_e:
+                                error_msgs.append(f'selenium extraction {contact_page}: {inner_e}')
+                                continue
                             
                             # 如果找到了足够的邮箱，就停止搜索
                             if len(current_site_emails) >= 2:

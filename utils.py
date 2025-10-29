@@ -3,7 +3,7 @@ import validators
 import pandas as pd
 import io 
 from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import selenium
 from selenium import webdriver
 from email_validator import validate_email, EmailNotValidError
@@ -48,12 +48,6 @@ COMPILED_SOCIAL_PATTERNS = {
     for platform, patterns in SOCIAL_MEDIA_PATTERNS.items()
 }
 
-# 严格邮箱抓取配置
-EMAIL_DOMAIN_WHITELIST = (
-    'gmail.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'protonmail.com', 'zoho.com', 'qq.com',
-    '163.com', '126.com', 'sina.com', 'yeah.net', 'foxmail.com', 'icloud.com', 'me.com', 'mail.com',
-    'edu', 'org', 'info', 'co', 'net', 'cn', 'com'
-)
 EMAIL_KEYWORDS = [
     'email', 'e-mail', 'mail', 'contact', 'outreach', 'support', 'info', 'admin', 'sales', 'service', 'help',
     'gmail', '163', 'qq', 'yahoo', 'outlook', 'edu', 'org', 'net', 'com'
@@ -77,62 +71,64 @@ EMAIL_BLACKLIST = [
     'designedand.developedby', 'allrights.reserved', 'all.rightsreserved'
 ]
 
+_BASIC_EMAIL_REGEX = re.compile(r'^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,24}$')
+
 def is_valid_email(email):
     # 1. 基本格式检查
     if not email or not isinstance(email, str):
         return False
     
+    candidate = email.strip()
+    
     # 2. 长度检查 (RFC 5321)
-    if len(email) < 5 or len(email) > 254:
+    if len(candidate) < 5 or len(candidate) > 254:
         return False
     
     # 3. 黑名单检查 - 检查是否包含任何黑名单关键词
-    email_lower = email.lower()
-    if any(b in email_lower for b in EMAIL_BLACKLIST):
+    lower_candidate = candidate.lower()
+    if any(b in lower_candidate for b in EMAIL_BLACKLIST):
         return False
     
-    # 4. 基本结构检查
-    parts = email.split('@')
-    if len(parts) != 2:
+    # 4. 使用 email_validator 进行标准化与严格验证
+    try:
+        normalized = validate_email(candidate, check_deliverability=False).email
+        candidate = normalized
+        lower_candidate = candidate.lower()
+    except EmailNotValidError:
+        # 如果email_validator认为无效，再使用基础正则作为兜底
+        if not _BASIC_EMAIL_REGEX.fullmatch(candidate):
+            return False
+    except Exception:
         return False
     
-    username, domain = parts[0], parts[1].lower()
-    
-    # 5. 用户名检查
-    if not username or len(username) > 64:
+    # 5. 基本结构检查
+    if '@' not in candidate:
         return False
     
-    # 6. 域名检查
+    username, domain = candidate.rsplit('@', 1)
+    domain = domain.lower()
+    
+    # 6. 用户名检查
+    if not username or len(username) > 64 or '..' in username:
+        return False
+    
+    # 7. 域名检查
     if not domain or len(domain) > 255 or '.' not in domain:
         return False
     
-    # 7. 域名白名单检查 - 检查TLD、SLD或完整域名是否在白名单中
     domain_parts = domain.split('.')
-    tld = domain_parts[-1] if domain_parts else ''
-    
-    # 检查顶级域名
-    tld_match = any(w == tld for w in EMAIL_DOMAIN_WHITELIST)
-    
-    # 检查二级域名+顶级域名组合
-    sld_tld = '.'.join(domain_parts[-2:]) if len(domain_parts) >= 2 else ''
-    sld_match = any(w == sld_tld for w in EMAIL_DOMAIN_WHITELIST)
-    
-    # 检查完整域名
-    full_match = any(w == domain for w in EMAIL_DOMAIN_WHITELIST)
-    
-    if not (tld_match or sld_match or full_match):
+    if any(not part for part in domain_parts):
         return False
     
-    # 8. 使用email_validator进行严格验证
-    try:
-        from email_validator import validate_email, EmailNotValidError
-        validate_email(email, check_deliverability=False)  # 不检查MX记录，只验证格式
-        return True
-    except (EmailNotValidError, ImportError):
+    tld = domain_parts[-1]
+    if not tld.isalpha() or not (2 <= len(tld) <= 24):
         return False
-    except Exception:
-        # 捕获其他可能的异常
+    
+    # 8. 最终黑名单检查（针对标准化后的邮箱）
+    if any(b in lower_candidate for b in EMAIL_BLACKLIST):
         return False
+    
+    return True
 
 def extract_valid_emails(text):
     import re
@@ -270,10 +266,19 @@ def extract_contacts_from_soup(soup, base_url):
     
     # 3.1 从mailto链接提取（最可靠的来源）
     for a in soup.find_all('a', href=True):
-        href = normalize_email_text(a['href'])
-        if href.startswith('mailto:'):
-            clean_email = href.replace('mailto:', '').split('?')[0].strip()
-            if '@' in clean_email:
+        href = a['href']
+        if not href:
+            continue
+        normalized_href = normalize_email_text(href)
+        if normalized_href.startswith('mailto:'):
+            clean_email = normalized_href.replace('mailto:', '', 1).split('?', 1)[0].strip()
+            if clean_email:
+                emails.update(extract_valid_emails(clean_email))
+        elif 'mailto:' in href.lower():
+            # 处理复杂的mailto编写方式，如 javascript:location='mailto:name@domain'
+            snippet = href[href.lower().index('mailto:') + len('mailto:'):]
+            clean_email = normalize_email_text(snippet).split('?', 1)[0].strip()
+            if clean_email:
                 emails.update(extract_valid_emails(clean_email))
     
     # 3.2 从图片alt和title属性提取
@@ -284,18 +289,39 @@ def extract_contacts_from_soup(soup, base_url):
             emails.update(extract_from_text(img['title']))
     
     # 3.3 从data属性提取
-    for elem in soup.find_all(lambda tag: any(attr for attr in tag.attrs if 'data-' in attr)):
+    for elem in soup.find_all(lambda tag: any(attr for attr in tag.attrs if 'data-' in attr or 'aria-' in attr or attr in {'content', 'value'})):
         for attr, value in elem.attrs.items():
-            if 'data-' in attr and isinstance(value, str) and '@' in value:
+            if isinstance(value, str) and '@' in value and any(marker in attr for marker in ['data-', 'aria-', 'content', 'value', 'email']):
                 emails.update(extract_from_text(value))
-    
-    # 3.4 从注释中提取
-    from bs4.Comment import Comment
+
+    # 3.4 从表单输入的占位符/默认值提取
+    for field in soup.find_all(['input', 'textarea']):
+        for attr in ('value', 'placeholder', 'data-placeholder'):
+            val = field.get(attr)
+            if isinstance(val, str) and '@' in val:
+                emails.update(extract_from_text(val))
+
+    # 3.5 从元标签和结构化数据提取
+    for meta in soup.find_all('meta'):
+        for attr in ('content', 'value', 'name'):
+            val = meta.get(attr)
+            if isinstance(val, str) and '@' in val:
+                emails.update(extract_from_text(val))
+
+    # 3.6 从注释中提取
     for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         if '@' in comment:
             emails.update(extract_from_text(comment))
+
+    # 3.7 从脚本、样式和noscript标签中提取
+    for tag in soup.find_all(['script', 'style', 'noscript']):
+        content = tag.string
+        if isinstance(content, str):
+            lowered = content.lower()
+            if any(token in lowered for token in ['@', '[at]', '(at', '{at', ' at ', ' dot ', '[dot]', '(dot', '{dot']):
+                emails.update(extract_from_text(content))
     
-    # 3.5 从联系相关区域提取
+    # 3.8 从联系相关区域提取
     contact_keywords = ['contact', 'about', 'support', 'help', 'team', '联系', '关于', '支持', '团队']
     
     # 通过ID查找
@@ -333,6 +359,11 @@ def extract_contacts_from_soup(soup, base_url):
             # 检查title属性
             if elem.get('title') and '@' in elem['title']:
                 emails.update(extract_from_text(elem['title']))
+    
+    # 3.9 兜底：扫描整页文本，捕获遗漏的邮箱
+    full_text = soup.get_text(separator=' ', strip=True)
+    if full_text and '@' in full_text:
+        emails.update(extract_from_text(full_text))
     
     # 4. 验证所有提取到的邮箱
     valid_emails = set()
