@@ -510,7 +510,13 @@ with tab2:
                         return ', '.join(social_links[platform])
                     return '无'
                 display_df = contacts_df.copy()
+                display_df['emails'] = display_df['emails'].apply(
+                    lambda x: ', '.join(x) if isinstance(x, list) and len(x) > 0 else '无'
+                )
                 display_df[f"{selected_platform} 链接"] = display_df['social_links'].apply(lambda x: get_links_str(x, selected_platform))
+                display_df['error'] = display_df['error'].fillna('').apply(
+                    lambda e: '无' if not e else (e if len(e) <= 160 else e[:157] + '...')
+                )
                 # 只展示核心列
                 columns_to_show = ["url", "emails", f"{selected_platform} 链接", "error"]
                 display_df = display_df[columns_to_show]

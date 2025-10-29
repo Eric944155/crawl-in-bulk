@@ -3,7 +3,8 @@ import validators
 import pandas as pd
 import io 
 from urllib.parse import urlparse, urljoin
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
+from bs4.element import Comment
 import selenium
 from selenium import webdriver
 from email_validator import validate_email, EmailNotValidError

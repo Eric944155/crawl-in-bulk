@@ -1,7 +1,8 @@
 import time
 import requests
+from urllib.parse import urlparse, urlunparse
 from bs4 import BeautifulSoup
-from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html, is_valid_email
+from utils import extract_contacts_from_soup, extract_social_links, get_rendered_html, is_valid_email, clean_url
 import pandas as pd
 
 # 强化邮箱抓取，移除电话，结构极简
@@ -30,6 +31,47 @@ CONTACT_PAGE_KEYWORDS = [
 ]
 MAX_RETRIES = 2
 
+def _generate_url_variants(url):
+    """生成一组候选URL，用于在网络不稳定或跳转规则复杂时重试。"""
+    url = url.strip()
+    if not url:
+        return []
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    parsed = urlparse(url)
+    netloc = parsed.netloc or ''
+    path = parsed.path or '/'
+    
+    host_variants = []
+    if netloc:
+        host_variants.append(netloc)
+        if not netloc.lower().startswith('www.'):
+            host_variants.append(f'www.{netloc}')
+    else:
+        host_variants.append('')
+    
+    scheme_variants = []
+    if parsed.scheme:
+        scheme_variants.append(parsed.scheme)
+    if 'https' not in scheme_variants:
+        scheme_variants.insert(0, 'https')
+    if 'http' not in scheme_variants:
+        scheme_variants.append('http')
+    
+    variants = []
+    for scheme in scheme_variants:
+        for host in host_variants:
+            variant = urlunparse((scheme, host, path, parsed.params, parsed.query, ''))
+            variants.append(variant)
+    # 去重同时保持顺序
+    seen = set()
+    ordered = []
+    for v in variants:
+        if v not in seen:
+            ordered.append(v)
+            seen.add(v)
+    return ordered
+
 def robust_get(url, headers, timeout=15):
     """
     增强版网页请求函数：
@@ -40,75 +82,35 @@ def robust_get(url, headers, timeout=15):
     """
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # 禁用SSL警告
-    
-    tried = set()
-    for attempt in range(MAX_RETRIES):
+    session = requests.Session()
+    session.headers.update(headers)
+    errors = []
+    variants = _generate_url_variants(url)
+    for candidate in variants:
         try:
-            # 允许重定向，但不验证SSL证书（提高兼容性）
-            resp = requests.get(
-                url, 
-                headers=headers, 
+            resp = session.get(
+                candidate,
                 timeout=timeout,
                 allow_redirects=True,
-                verify=False  # 不验证SSL证书
+                verify=False
             )
-            
-            # 检查是否成功
             if resp.status_code < 400:
                 return resp, None
-            else:
-                resp.raise_for_status()  # 触发异常以便捕获
-                
-        except requests.exceptions.SSLError:
-            # SSL错误，尝试不验证SSL证书
-            try:
-                resp = requests.get(url, headers=headers, timeout=timeout, verify=False)
-                if resp.status_code < 400:
-                    return resp, None
-            except Exception as inner_e:
-                pass  # 继续尝试其他方法
-                
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, 
-                requests.exceptions.TooManyRedirects, requests.exceptions.HTTPError) as e:
-            tried.add(url)
-            
-            # 尝试切换 http/https
-            if url.startswith('http://'):
-                alt_url = url.replace('http://', 'https://', 1)
-            elif url.startswith('https://'):
-                alt_url = url.replace('https://', 'http://', 1)
-            else:
-                alt_url = 'https://' + url
-                
-            if alt_url not in tried:
-                url = alt_url
-                continue
-                
-            # 最后一次尝试，增加www前缀
-            if attempt == MAX_RETRIES - 1 and 'www.' not in url.lower():
-                if url.startswith('http://'):
-                    www_url = url.replace('http://', 'http://www.', 1)
-                elif url.startswith('https://'):
-                    www_url = url.replace('https://', 'https://www.', 1)
-                else:
-                    www_url = 'http://www.' + url
-                    
-                if www_url not in tried:
-                    try:
-                        resp = requests.get(www_url, headers=headers, timeout=timeout, verify=False)
-                        if resp.status_code < 400:
-                            return resp, None
-                    except Exception:
-                        pass  # 忽略错误，继续尝试
-            
-            if attempt == MAX_RETRIES - 1:  # 最后一次尝试失败
-                return None, f"Connection error: {str(e)}"
-                
+            errors.append(f'{candidate}: HTTP {resp.status_code}')
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.TooManyRedirects, requests.exceptions.SSLError) as e:
+            errors.append(f'{candidate}: {e}')
         except Exception as e:
-            if attempt == MAX_RETRIES - 1:  # 最后一次尝试失败
-                return None, f"Error: {str(e)}"
-    
-    return None, f'Failed after {MAX_RETRIES} retries'
+            errors.append(f'{candidate}: {e}')
+        if len(errors) >= MAX_RETRIES and len(errors) >= len(variants):
+            break
+    deduped_errors = []
+    seen = set()
+    for err in errors:
+        if err not in seen:
+            deduped_errors.append(err)
+            seen.add(err)
+    return None, '; '.join(deduped_errors) if deduped_errors else 'Unknown connection error'
 
 
 def crawl_contacts(websites, use_selenium=True, max_depth=2):
@@ -132,7 +134,7 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
     }
     contacts = []
     for url_entry in websites['URL']: # Iterate through the URL column
-        base_url = url_entry if url_entry.startswith('http') else 'http://' + url_entry
+        base_url = clean_url(url_entry)
         current_site_emails = set()
         social_links_main_dict = {}
         error_msgs = []
@@ -256,8 +258,8 @@ def crawl_contacts(websites, use_selenium=True, max_depth=2):
                 validated_emails.add(email)
         
         # 6. 去重整理
-        emails_found = list(validated_emails)
-        social_links_found = {k: list(v) for k, v in social_links_main_dict.items()}
+        emails_found = sorted(validated_emails)
+        social_links_found = {k: sorted(v) for k, v in social_links_main_dict.items()}
         error = '\n'.join(error_msgs) if error_msgs else None
         
         # 7. 添加到结果
