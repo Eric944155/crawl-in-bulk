@@ -1,13 +1,31 @@
 import re
+import sys
+from types import ModuleType
 import validators
 import pandas as pd
 import io 
 from urllib.parse import urlparse, urljoin
 from bs4 import BeautifulSoup
-from bs4.element import Comment
 import selenium
 from selenium import webdriver
 from email_validator import validate_email, EmailNotValidError
+
+try:
+    from bs4 import Comment as _BS4Comment
+except ImportError:
+    try:
+        from bs4.element import Comment as _BS4Comment
+    except ImportError:
+        class _BS4Comment(str):
+            """Fallback Comment type when bs4 Comment is unavailable."""
+            pass
+
+if 'bs4.Comment' not in sys.modules:
+    comment_module = ModuleType('bs4.Comment')
+    comment_module.Comment = _BS4Comment
+    sys.modules['bs4.Comment'] = comment_module
+
+Comment = _BS4Comment
 
 # 社交媒体域名和对应的平台名称映射
 # 优化：更全面，更精准的匹配模式
